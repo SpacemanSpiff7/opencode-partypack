@@ -1,1 +1,9 @@
-# nothing to ignore yet — the repo is plain config + plugins
+# Runtime state from tools that happened to run here
+.omx/
+.opencode/logs/
+.opencode/verify-bash-next-approved
+.opencode/verify-bash-approvals.log
+node_modules/
+
+# Test artifacts
+coverage/
