@@ -426,6 +426,7 @@ function extractWrite(tool, args, root) {
       absPath: abs,
       kind: "write",
       diff: makeUnifiedView(oldContent, content, abs),
+      content,
     }
   }
 
@@ -566,6 +567,37 @@ function sha256(s) {
   return crypto.createHash("sha256").update(s).digest("hex")
 }
 
+// ---------- Script whitelist (cross-plugin contract with verify-bash) ----------
+
+// File extensions that are directly executable via bash/node/python/etc.
+// Approved writes to these paths get a content-hash entry in the whitelist so
+// verify-bash can bypass re-classification of the resulting bash invocation.
+const EXECUTABLE_SCRIPT_RE = /\.(mjs|cjs|js|ts|tsx|py|sh|bash|zsh|fish|rb|pl)$/
+
+function appendScriptWhitelist(root, absPath, content, stage, diffSha) {
+  if (!EXECUTABLE_SCRIPT_RE.test(absPath)) return
+  const sha = crypto.createHash("sha256").update(String(content)).digest("hex")
+  const wlPath = path.join(root, ".opencode/guard-config-review.whitelist.json")
+  let map = {}
+  try {
+    map = JSON.parse(fs.readFileSync(wlPath, "utf8"))
+  } catch {
+    /* fresh */
+  }
+  map[absPath] = {
+    sha256: sha,
+    approvedAt: new Date().toISOString(),
+    diffSha,
+    stage,
+  }
+  try {
+    fs.mkdirSync(path.dirname(wlPath), { recursive: true })
+    fs.writeFileSync(wlPath, JSON.stringify(map, null, 2))
+  } catch {
+    /* never block on whitelist write */
+  }
+}
+
 // ---------- Plugin entry ----------
 
 export default async ({ worktree, directory }) => {
@@ -690,6 +722,9 @@ export default async ({ worktree, directory }) => {
       if (!escalate) {
         // Stage 1 unanimous ALLOW + small diff + path not on always-frontier list → permit.
         cache.set(cacheKey, "ALLOW", [])
+        if (kind === "write" && writeInfo.content != null) {
+          appendScriptWhitelist(root, absPath, writeInfo.content, "stage1-pass", cacheKey)
+        }
         logDecision({
           verdict: "ALLOW",
           reason: "stage1-pass",
@@ -766,6 +801,9 @@ export default async ({ worktree, directory }) => {
       }
 
       cache.set(cacheKey, "ALLOW", [])
+      if (kind === "write" && writeInfo.content != null) {
+        appendScriptWhitelist(root, absPath, writeInfo.content, "stage2-pass", cacheKey)
+      }
       logDecision({
         verdict: "ALLOW",
         reason: "stage2-pass",

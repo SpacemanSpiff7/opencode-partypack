@@ -75,7 +75,8 @@
       "*.xcconfig": "ask",
       ".github/workflows/**": "ask",
       "Fastfile": "ask",
-      "fastlane/**": "ask"
+      "fastlane/**": "ask",
+      ".opencode/guard-config-review.whitelist.json": "deny"
     },
     "glob": "allow",
     "grep": "allow",
@@ -198,7 +199,8 @@
       "git restore .": "deny",
       "git submodule deinit --force*": "deny",
       "git submodule deinit -f *": "deny",
-      "*--dangerously-skip-permissions*": "deny"
+      "*--dangerously-skip-permissions*": "deny",
+      "*guard-config-review.whitelist*": "deny"
     }
   },
   "provider": {

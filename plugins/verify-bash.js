@@ -51,6 +51,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import crypto from "node:crypto"
 
 const AUTH_PATH = path.join(os.homedir(), ".local/share/opencode/auth.json")
 const NOCACHE_ENV = process.env.OPENCODE_VERIFY_BASH_NOCACHE === "1"
@@ -285,6 +286,56 @@ function callModel(spec, auth, sentry, body, timeoutMs) {
   return Promise.resolve(null)
 }
 
+// Cross-plugin contract: guard-config-review writes
+// .opencode/guard-config-review.whitelist.json with { absPath: { sha256, ... } } when
+// it approves a write to an executable script. We check that here: if the proposed
+// bash command invokes a whitelisted script AND the script's current content hash
+// still matches the approved hash, ALLOW immediately. If the hash differs (script was
+// modified post-approval), log "whitelist-stale" and fall through to the panel.
+const SCRIPT_INVOKE_RES = [
+  // interpreter + target: node foo.mjs / python3 foo.py / bash foo.sh / npx tsx foo.ts
+  /^\s*(?:node|nodejs|npx|tsx|deno|bun|python3?|python|ruby|rb|bash|sh|zsh|perl)\s+(\S+)/,
+  // bare invocation of a script path: scripts/util/foo.mjs OR ./scripts/foo.sh
+  /^\s*(?:\.\/)?((?:scripts|bin)\/[^\s;|&]+\.(?:mjs|cjs|js|ts|tsx|py|sh|bash|zsh|rb|pl))(?:\s|$)/,
+]
+
+function checkWhitelistedScript(root, cmd) {
+  const wlPath = path.join(root, ".opencode/guard-config-review.whitelist.json")
+  let map
+  try {
+    map = JSON.parse(fs.readFileSync(wlPath, "utf8"))
+  } catch {
+    return { allowed: false }
+  }
+  const candidates = new Set()
+  for (const re of SCRIPT_INVOKE_RES) {
+    const m = cmd.match(re)
+    if (m && m[1]) candidates.add(m[1])
+  }
+  for (const cand of candidates) {
+    const abs = path.isAbsolute(cand) ? cand : path.join(root, cand)
+    const entry = map[abs]
+    if (!entry) continue
+    let actualSha
+    try {
+      const content = fs.readFileSync(abs, "utf8")
+      actualSha = crypto.createHash("sha256").update(content).digest("hex")
+    } catch {
+      continue // script gone — can't verify
+    }
+    if (actualSha === entry.sha256) {
+      return {
+        allowed: true,
+        reason: "whitelisted-script",
+        scriptPath: abs,
+        approvedAt: entry.approvedAt,
+      }
+    }
+    return { allowed: false, stale: true, scriptPath: abs }
+  }
+  return { allowed: false }
+}
+
 function classify(name, verdict) {
   if (!verdict)
     return { name, status: "abstain", detail: "no response (network/auth/rate-limit/timeout)" }
@@ -360,6 +411,28 @@ export default async ({ worktree, directory }) => {
       if (ALWAYS_SAFE_RE.test(cmd) || extraSafe.some((re) => re.test(cmd))) {
         logDecision({ verdict: "ALLOW", reason: "safe-pattern", cmd: cmd.slice(0, 200) })
         return
+      }
+
+      // Cross-plugin whitelist consultation (set by guard-config-review on approved writes).
+      const wl = checkWhitelistedScript(root, cmd)
+      if (wl.allowed) {
+        logDecision({
+          verdict: "ALLOW",
+          reason: "whitelisted-script",
+          cmd: cmd.slice(0, 200),
+          scriptPath: wl.scriptPath,
+          approvedAt: wl.approvedAt,
+        })
+        return
+      }
+      if (wl.stale) {
+        logDecision({
+          verdict: "INFO",
+          reason: "whitelist-stale",
+          cmd: cmd.slice(0, 200),
+          scriptPath: wl.scriptPath,
+        })
+        // fall through to full panel
       }
 
       if (fs.existsSync(APPROVAL_FILE)) {

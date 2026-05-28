@@ -310,6 +310,51 @@ Every decision lands in `.opencode/logs/guard-config-review.log` as one JSON lin
 
 Auditable trail of every reviewer decision, every cache hit, every ephemeral bypass.
 
+### Script whitelist — review effort amortizes
+
+When `guard-config-review` ALLOWs a `write` to an executable script path (`.mjs`, `.cjs`, `.js`, `.ts`, `.tsx`, `.py`, `.sh`, `.bash`, `.zsh`, `.fish`, `.rb`, `.pl`), it appends an entry to `.opencode/guard-config-review.whitelist.json`:
+
+```json
+{
+  "/repo/scripts/util/foo.mjs": {
+    "sha256": "abc123...",
+    "approvedAt": "2026-05-28T19:14:22Z",
+    "diffSha": "def456...",
+    "stage": "stage1-pass"
+  }
+}
+```
+
+`verify-bash` consults this whitelist before classifying any bash command. If the command invokes a path that's whitelisted **AND** the script's current sha256 matches the approved sha256, the panel is skipped entirely — `ALLOW` with reason `whitelisted-script`. This means **one review approves the script forever** (or until you modify it).
+
+If the script is modified post-approval, the hash mismatches, `verify-bash` logs `whitelist-stale` for that command, and falls through to the normal consensus panel. So edits don't silently exfiltrate trust — they require a fresh review (which the `write` tool delivers automatically via `guard-config-review`).
+
+Command patterns recognized as script invocations:
+
+```bash
+node scripts/util/foo.mjs          # interpreter + path
+python3 scripts/util/foo.py
+bash scripts/util/deploy.sh
+npx tsx scripts/util/bar.ts
+./scripts/util/run.mjs             # bare invocation with leading ./
+scripts/util/foo.mjs               # bare relative path
+```
+
+The whitelist file is protected three ways: opencode permission rules deny writes to it, the verify-bash sentry treats bash mutations of it as HARD DENY, and the gate's own write-path is a direct fs call that bypasses all tool layers (so the plugin can legitimately update it).
+
+### Workflow: ephemeral → durable → reused
+
+The split lines up naturally with how scripts actually evolve:
+
+1. **Ephemeral exploration** — agent writes `/tmp/probe.mjs`, iterates, runs. Zero review cost.
+2. **Promotion to durable** — agent decides the script is reusable, calls `Write { file_path: "scripts/util/probe.mjs", content: ... }`. `guard-config-review` reviews the content, ALLOWs, emits whitelist entry.
+3. **Reuse** — subsequent `node scripts/util/probe.mjs` invocations skip the verify-bash panel via the whitelist. No re-billing, no latency, no re-review.
+4. **Modification** — agent edits the script. The edit is itself a sensitive write, so `guard-config-review` re-reviews the new content. If approved, the whitelist entry is replaced with the new sha256. Old hash is gone.
+
+You pay for review when content changes, not when scripts run.
+
+---
+
 ### Honest limits
 
 - **Argv- and content-based, not OS-level.** A creatively-encoded malicious diff (steganographic comments, obfuscated control flow) could pass review. The panel is paranoid but not omniscient.
