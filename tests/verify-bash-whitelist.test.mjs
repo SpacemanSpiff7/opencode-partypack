@@ -139,7 +139,7 @@ describe("verify-bash — script whitelist consumption", () => {
     expect(log[0].reason).toBe("whitelist-stale")
     expect(log[0].scriptPath).toBe(abs)
     expect(log[log.length - 1].verdict).toBe("ALLOW")
-    expect(log[log.length - 1].reason).toBe("consensus-allow")
+    expect(["stage1-pass", "stage2-pass"]).toContain(log[log.length - 1].reason)
   })
 
   it("no whitelist file → normal classification", async () => {
@@ -156,7 +156,7 @@ describe("verify-bash — script whitelist consumption", () => {
       return { ok: false }
     })
     const hooks = await getHooks()
-    await callBefore(hooks, "ls Packages/")
+    await callBefore(hooks, "make build")
     // Whitelist is absent — panel handles via normal flow (some calls happened).
     expect(global.fetch).toHaveBeenCalled()
   })
@@ -181,7 +181,7 @@ describe("verify-bash — script whitelist consumption", () => {
       return { ok: false }
     })
     const hooks = await getHooks()
-    await callBefore(hooks, "ls Packages/")
+    await callBefore(hooks, "make build")
     expect(calls).toBeGreaterThan(0)
   })
 

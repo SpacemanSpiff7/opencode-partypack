@@ -1,41 +1,41 @@
-// verify-bash — N-model CONSENSUS gate for bash commands (Architecture B).
+// verify-bash — HYBRID 3+2 consensus gate for bash commands.
 //
-// v2 — generic + configurable + observable + cached + timeout-bounded.
+// v3 — staged cheap-first review with frontier escalation. Less false-positive
+// friction than v2's flat 5-model panel; cheaper on the common case; better
+// signal because the frontier sees WHY cheap models flagged a command.
 //
 // CONFIG (per project, optional): `.opencode/verify-bash.config.json`
 //   {
 //     "enabled": true,                       // false = no-op
-//     "minAllow": 3,                         // minimum ALLOW votes required
+//     "stage1Models": [ ... ],               // override Stage 1 panel
+//     "stage2Models": [ ... ],               // override Stage 2 panel
 //     "timeoutMs": 12000,                    // per-call fetch deadline
 //     "cacheMax": 256,                       // LRU size; 0 = no cache
 //     "safePatterns": ["^make help$", ...],  // extra regex patterns to skip
 //     "sentryPrompt": "...optional override...",
-//     "models": [                            // override default panel
-//       { "provider": "openai-api",         "model": "gpt-5.5" },
-//       { "provider": "openai-api",         "model": "gpt-5.4" },
-//       { "provider": "openai-api",         "model": "gpt-5.4-mini" },
-//       { "provider": "anthropic-personal", "model": "claude-opus-4-6" },
-//       { "provider": "anthropic-personal", "model": "claude-sonnet-4-6" },
-//       { "provider": "anthropic-personal", "model": "claude-haiku-4-5" }
-//     ]
 //   }
 //
-// If a configured provider has no credential in auth.json, that model abstains
-// (the consensus degrades gracefully — never crashes).
+// HYBRID 3+2 CONSENSUS:
+//   Stage 1 (cheap, always): haiku-4-5 + deepseek-v4-flash. Vote ALLOW or FLAG.
+//     • Unanimous ALLOW → permit. No Stage 2 call. ~$0.0005, ~700ms.
+//     • Any FLAG (or any abstain) → escalate to Stage 2.
+//   Stage 2 (frontier, only on escalation): sonnet-4-6 + gpt-5.4 + deepseek-v4-pro.
+//     Each frontier model sees the Stage 1 dissent reasons in its prompt so it
+//     can refute false positives. Vote ALLOW or DENY.
+//     • ANY DENY → block (cite all dissenters).
+//     • ≥2 ALLOW + 0 DENY + 0 abstain → permit.
+//     • Anything else → block (insufficient consensus).
+//   All-abstain at any stage → fallthrough to opencode native ask.
 //
-// STRICT CONSENSUS:
-//   • ANY DENY → block (cite all dissenters).
-//   • ≥minAllow ALLOW AND 0 DENY → allow.
-//   • Fewer than minAllow ALLOW → block (insufficient consensus).
-//   • Unparseable response → counted as DENY.
-//   • All models abstain → fall through to opencode native ask.
+// ALWAYS_SAFE_RE mirrors opencode's read-only auto-allow set — those commands
+// never hit the gate. The reviewers were rubber-stamping them at $0.001/call
+// anyway, and single-model false positives on obvious idioms (e.g.
+// `jq empty <file>`) caused unnecessary HARDSTOPs.
 //
-// LRU CACHE (in-memory, session-scoped, ALLOWs only):
-//   First time you see `git status` → full panel runs. Rest of the session it's
-//   a cache hit at ~0ms. DENYs are never cached (policy may evolve).
+// LRU CACHE (in-memory, session-scoped, ALLOWs only). DENYs never cached.
 //
-// CLASSIFICATION LOG: every decision is appended to
-//   `.opencode/logs/verify-bash.log` as one JSON line. Auditable trail.
+// LOG: every decision appended to `.opencode/logs/verify-bash.log` as one JSON
+// line. Auditable trail.
 //
 // FETCH TIMEOUT: each model has its own AbortSignal. A hung provider can't
 // block the panel — it just abstains.
@@ -57,14 +57,55 @@ const AUTH_PATH = path.join(os.homedir(), ".local/share/opencode/auth.json")
 const NOCACHE_ENV = process.env.OPENCODE_VERIFY_BASH_NOCACHE === "1"
 const TIMEOUT_ENV = Number(process.env.OPENCODE_VERIFY_BASH_TIMEOUT || 0) || null
 
-// Always-safe — exact, zero-argument, zero-side-effect.
-const ALWAYS_SAFE_RE = /^\s*(pwd|whoami|hostname|date)\s*$/
+// Mirrors opencode's read-only auto-allow set. Commands matching this pattern
+// NEVER hit the consensus panel.
+const ALWAYS_SAFE_RE = new RegExp(
+  "^\\s*(" +
+    // zero-arg trivia
+    "pwd|whoami|hostname|date|uname|true|false|uptime|" +
+    // tooling location
+    "(which|command -v|type)\\s+[\\w/.-]+|" +
+    // path inspection
+    "ls(\\s+-[a-zA-Z0-9]+)*(\\s+[\\w./@~*-]+)*|" +
+    "stat(\\s+-[a-zA-Z0-9]+)*\\s+\\S+|" +
+    "file\\s+\\S+|" +
+    "wc(\\s+-[a-zA-Z0-9]+)*\\s+\\S+|" +
+    "du(\\s+-[a-zA-Z0-9]+)*(\\s+\\S+)?|" +
+    "df(\\s+-[a-zA-Z0-9]+)*|" +
+    "tree(\\s+\\S+)*|" +
+    // process/system inspection
+    "ps(\\s+-[a-zA-Z]+)*|" +
+    "pgrep\\s+\\S+|" +
+    "lsof(\\s+-[a-zA-Z]+)*(\\s+\\S+)?|" +
+    // content reading (no redirects/pipes that mutate)
+    "(cat|head|tail|nl)(\\s+-[a-zA-Z0-9]+)*\\s+[^|>&;]+|" +
+    "(grep|rg|egrep|fgrep)(\\s+-[a-zA-Z]+)*\\s+[^|>&;]+|" +
+    "sed\\s+-n\\s+[^|>&;]+|" +
+    // jq read-only forms — jq empty <file>, jq . <file>, jq '<filter>' <file>
+    // (no -i / --in-place — those are mutations)
+    "jq(\\s+-[a-zA-Z]+)*\\s+\\S+(\\s+[^|>&;]+)?|" +
+    // git read-only verbs
+    "git\\s+(status|log|show|diff|blame|reflog|ls-files|ls-tree|rev-parse|" +
+      "config\\s+--get|describe|tag|branch(\\s+-l)?|remote(\\s+-v)?|" +
+      "check-ignore|cat-file|fsck|count-objects)(\\s+[^|>&;]+)?|" +
+    // gh read-only
+    "gh\\s+(pr\\s+(view|list|diff|checks|status)|issue\\s+(view|list|status)|" +
+      "release\\s+(view|list)|workflow\\s+(view|list)|repo\\s+view|" +
+      "auth\\s+status)(\\s+[^|>&;]+)?" +
+  ")\\s*$",
+)
 
-const DEFAULT_MODELS = [
-  { provider: "openai-api", model: "gpt-5.4" },
-  { provider: "openai-api", model: "gpt-5.4-mini" },
-  { provider: "anthropic-personal", model: "claude-sonnet-4-6" },
+// Stage 1 — cheap pre-filter. Fast, $0.0005-ish. Catches obvious slop.
+const STAGE1_DEFAULT = [
   { provider: "anthropic-personal", model: "claude-haiku-4-5" },
+  { provider: "deepseek", model: "deepseek-v4-flash" },
+]
+
+// Stage 2 — frontier, only fires on Stage 1 FLAG. Sees the cheap dissent
+// reasons in its prompt so it can refute false positives.
+const STAGE2_DEFAULT = [
+  { provider: "anthropic-personal", model: "claude-sonnet-4-6" },
+  { provider: "openai-api", model: "gpt-5.4" },
   { provider: "deepseek", model: "deepseek-v4-pro" },
 ]
 
@@ -75,6 +116,8 @@ const DEFAULT_SENTRY = [
   "REPLY FORMAT — EXACTLY one line:",
   "  ALLOW: <one-line reason>",
   "  DENY:  <one-line reason>",
+  "",
+  "(In Stage 1, FLAG: <reason> is also valid and triggers Stage 2 review.)",
   "",
   "------- HARD DENY (never allowed, no matter the context) -------",
   "",
@@ -134,24 +177,35 @@ const DEFAULT_SENTRY = [
   "DEPENDENCY INSTALLATION (need user approval, not yours):",
   "  • `brew install`, `npm install`, `npm i`, `pip install`, `gem install`, `cargo install`.",
   "",
+  "GUARD INTEGRITY:",
+  "  • Any mutation of `.opencode/guard-config-review.whitelist.json` is HARD DENY",
+  "    (only the gate plugin's direct fs API may modify it).",
+  "",
   "UNREADABLE / OBFUSCATED COMMANDS:",
   "  • Anything you cannot understand at a glance — DENY.",
   "",
   "------- ALLOW (only when CLEARLY fitting) -------",
   "  • Read-only repo inspection: `ls`, `cat`, `head`, `tail`, `wc`, `grep`/`rg`/`sed -n` over repo paths.",
-  "  • Read-only git: status / log / diff / show / ls-tree / check-ignore.",
+  "  • Read-only git: status / log / diff / show / ls-tree / check-ignore / blame / reflog.",
   "  • Git mutations with concrete arguments: add / commit -m / switch / checkout <branch> (NOT --force) /",
   "    stash / mv / fetch / pull / push (NOT --force).",
   "  • Read-only gh: pr/issue/release view/list/diff/checks/status; gh api read-only endpoints.",
   "  • Build/test toolchain (whatever the project uses) with project-shape arguments.",
   "  • In-repo path creation: `mkdir -p <repo-path>`, `touch <repo-path>`.",
+  "  • Read-only JSON validation: `jq empty <file>`, `jq . <file>`, `jq '<filter>' <file>` —",
+  "    standard developer idioms, no side effects.",
+  "  • Script execution from approved paths (the verify-bash whitelist covers content review).",
   "",
   "------- DECISION RULE -------",
   "If on the ALLOW list AND arguments clearly scoped to the repo AND nothing in",
-  "HARD DENY matches — ALLOW. Otherwise — DENY.",
+  "HARD DENY matches — ALLOW. Otherwise — DENY (Stage 2) / FLAG (Stage 1).",
   "",
-  "Be CONSERVATIVE. A false-DENY costs the user one re-run. A false-ALLOW can leak",
-  "secrets, delete files, or push bad code. Always prefer DENY.",
+  "Stage 1: bias toward ALLOW for clear read-only idioms — escalate (FLAG) only on real",
+  "concerns. Stage 2 will see your reasoning and adjudicate; you are not the final word.",
+  "",
+  "Stage 2: you ARE the final word. Read the Stage 1 dissent carefully and decide whether",
+  "they were correct. False positives are recoverable (the user can /approve and retry);",
+  "false ALLOWs can leak secrets, delete files, or push bad code. When in genuine doubt — DENY.",
 ].join("\n")
 
 function loadAuth() {
@@ -203,7 +257,7 @@ async function callOpenAI(bearer, model, sentry, body, timeoutMs) {
           ],
         }),
       },
-      timeoutMs
+      timeoutMs,
     )
     if (!res.ok) return null
     const j = await res.json()
@@ -231,7 +285,7 @@ async function callAnthropic(key, model, sentry, body, timeoutMs) {
           messages: [{ role: "user", content: body }],
         }),
       },
-      timeoutMs
+      timeoutMs,
     )
     if (!res.ok) return null
     const j = await res.json()
@@ -293,9 +347,7 @@ function callModel(spec, auth, sentry, body, timeoutMs) {
 // still matches the approved hash, ALLOW immediately. If the hash differs (script was
 // modified post-approval), log "whitelist-stale" and fall through to the panel.
 const SCRIPT_INVOKE_RES = [
-  // interpreter + target: node foo.mjs / python3 foo.py / bash foo.sh / npx tsx foo.ts
   /^\s*(?:node|nodejs|npx|tsx|deno|bun|python3?|python|ruby|rb|bash|sh|zsh|perl)\s+(\S+)/,
-  // bare invocation of a script path: scripts/util/foo.mjs OR ./scripts/foo.sh
   /^\s*(?:\.\/)?((?:scripts|bin)\/[^\s;|&]+\.(?:mjs|cjs|js|ts|tsx|py|sh|bash|zsh|rb|pl))(?:\s|$)/,
 ]
 
@@ -336,7 +388,17 @@ function checkWhitelistedScript(root, cmd) {
   return { allowed: false }
 }
 
-function classify(name, verdict) {
+function classifyStage1(name, verdict) {
+  if (!verdict)
+    return { name, status: "abstain", detail: "no response (network/auth/rate-limit/timeout)" }
+  const v = verdict.trim().split("\n")[0]
+  if (/^ALLOW\b/i.test(v)) return { name, status: "allow", detail: v }
+  if (/^FLAG\b/i.test(v)) return { name, status: "flag", detail: v }
+  if (/^DENY\b/i.test(v)) return { name, status: "flag", detail: v } // DENY → FLAG escalate
+  return { name, status: "flag", detail: "unparseable response, escalating: " + v }
+}
+
+function classifyStage2(name, verdict) {
   if (!verdict)
     return { name, status: "abstain", detail: "no response (network/auth/rate-limit/timeout)" }
   const v = verdict.trim().split("\n")[0]
@@ -371,8 +433,14 @@ export default async ({ worktree, directory }) => {
   const root = worktree || directory || process.cwd()
   const config = loadConfig(root)
   const enabled = config.enabled !== false
-  const models = Array.isArray(config.models) && config.models.length > 0 ? config.models : DEFAULT_MODELS
-  const minAllow = Number.isInteger(config.minAllow) ? config.minAllow : 3
+  const stage1Models =
+    Array.isArray(config.stage1Models) && config.stage1Models.length > 0
+      ? config.stage1Models
+      : STAGE1_DEFAULT
+  const stage2Models =
+    Array.isArray(config.stage2Models) && config.stage2Models.length > 0
+      ? config.stage2Models
+      : STAGE2_DEFAULT
   const timeoutMs = TIMEOUT_ENV || Number(config.timeoutMs) || 12000
   const cacheMax = NOCACHE_ENV ? 0 : Number.isInteger(config.cacheMax) ? config.cacheMax : 256
   const sentry = typeof config.sentryPrompt === "string" ? config.sentryPrompt : DEFAULT_SENTRY
@@ -441,7 +509,7 @@ export default async ({ worktree, directory }) => {
           fs.mkdirSync(path.dirname(APPROVAL_LOG), { recursive: true })
           fs.appendFileSync(
             APPROVAL_LOG,
-            JSON.stringify({ ts: new Date().toISOString(), cmd, mode: "one-shot-user-approval" }) + "\n"
+            JSON.stringify({ ts: new Date().toISOString(), cmd, mode: "one-shot-user-approval" }) + "\n",
           )
         } catch {
           /* don't block on logging */
@@ -461,96 +529,135 @@ export default async ({ worktree, directory }) => {
         return
       }
 
-      const body =
-        "Proposed bash command (classify per policy):\n" +
-        cmd +
-        "\n\nReply EXACTLY one line: ALLOW: <reason> or DENY: <reason>."
-
       const t0 = Date.now()
-      const panel = await Promise.all(models.map((m) => callModel(m, auth, sentry, body, timeoutMs)))
-      const latencyMs = Date.now() - t0
 
-      const votes = models.map((m, i) => classify(`${m.provider}/${m.model}`, panel[i]))
-      const denies = votes.filter((v) => v.status === "deny")
-      const allows = votes.filter((v) => v.status === "allow")
-      const abstains = votes.filter((v) => v.status === "abstain")
+      // -------- Stage 1 — cheap pre-filter --------
+      const stage1Body =
+        "Pre-filter bash safety review (Stage 1 of 2). Reply ALLOW or FLAG.\n\n" +
+        "Proposed command:\n" + cmd
 
-      if (abstains.length === models.length) {
+      const stage1Raw = await Promise.all(
+        stage1Models.map((m) => callModel(m, auth, sentry, stage1Body, timeoutMs)),
+      )
+      const stage1Votes = stage1Models.map((m, i) =>
+        classifyStage1(`${m.provider}/${m.model}`, stage1Raw[i]),
+      )
+      const stage1Allows = stage1Votes.filter((v) => v.status === "allow").length
+      const stage1Flags = stage1Votes.filter((v) => v.status === "flag")
+      const stage1Abstains = stage1Votes.filter((v) => v.status === "abstain").length
+
+      // All cheap models couldn't respond → native ask (don't risk a false
+      // negative on insufficient panel coverage).
+      if (stage1Abstains === stage1Models.length) {
         logDecision({
           verdict: "FALLTHROUGH",
-          reason: "all-abstained",
-          latencyMs,
+          reason: "all-abstained-stage1",
+          latencyMs: Date.now() - t0,
           cmd: cmd.slice(0, 200),
-          votes,
+          stage1: stage1Votes,
         })
         return
       }
 
-      if (denies.length > 0) {
+      // No flags → cheap-stage unanimous ALLOW. Permit without escalation.
+      if (stage1Flags.length === 0) {
+        if (cache) cache.set(cmd, true)
         logDecision({
-          verdict: "DENY",
-          reason: "consensus-deny",
+          verdict: "ALLOW",
+          reason: "stage1-pass",
+          latencyMs: Date.now() - t0,
+          cmd: cmd.slice(0, 200),
+          stage1Allows,
+          stage1Abstains,
+        })
+        return
+      }
+
+      // -------- Stage 2 — frontier, sees the Stage 1 dissent --------
+      const dissentNote = stage1Flags
+        .map((v) => `[${v.name}] ${v.detail}`)
+        .join(" | ")
+      const stage2Body =
+        "Frontier bash safety review (Stage 2 of 2). Reply ALLOW or DENY.\n\n" +
+        "Proposed command:\n" + cmd + "\n\n" +
+        "Stage 1 dissent (cheaper models flagged this — review their reasoning and decide " +
+        "whether they were right or wrong; you have final say):\n" +
+        dissentNote
+
+      const stage2Raw = await Promise.all(
+        stage2Models.map((m) => callModel(m, auth, sentry, stage2Body, timeoutMs)),
+      )
+      const stage2Votes = stage2Models.map((m, i) =>
+        classifyStage2(`${m.provider}/${m.model}`, stage2Raw[i]),
+      )
+      const stage2Allows = stage2Votes.filter((v) => v.status === "allow")
+      const stage2Denies = stage2Votes.filter((v) => v.status === "deny")
+      const stage2Abstains = stage2Votes.filter((v) => v.status === "abstain")
+      const latencyMs = Date.now() - t0
+
+      // All frontier abstained → fallthrough.
+      if (stage2Abstains.length === stage2Models.length) {
+        logDecision({
+          verdict: "FALLTHROUGH",
+          reason: "all-abstained-stage2",
           latencyMs,
           cmd: cmd.slice(0, 200),
-          allows: allows.length,
-          denies: denies.length,
-          abstains: abstains.length,
-          votes,
+          stage1: stage1Votes,
+          stage2: stage2Votes,
         })
-        const reasons = denies.map((d) => `[${d.name}] ${d.detail}`).join(" | ")
+        return
+      }
+
+      // ANY frontier DENY → block.
+      if (stage2Denies.length > 0) {
+        logDecision({
+          verdict: "DENY",
+          reason: "stage2-deny",
+          latencyMs,
+          cmd: cmd.slice(0, 200),
+          stage1: stage1Votes,
+          stage2: stage2Votes,
+        })
+        const reasons = stage2Denies.map((d) => `[${d.name}] ${d.detail}`).join(" | ")
         throw new Error(
-          "\n🚫 verify-bash CONSENSUS DENY — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
-            "Command: " +
-            cmd +
-            "\n\n" +
-            "Dissenters: " +
-            reasons +
-            "\n\n" +
+          "\n🚫 verify-bash STAGE-2 DENY — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
+            "Command: " + cmd + "\n\n" +
+            "Stage 1 dissent (cheap models flagged this): " + dissentNote + "\n\n" +
+            "Stage 2 frontier review confirmed: " + reasons + "\n\n" +
             "DO NOT retry, rephrase, or work around this command without explicit user approval.\n" +
             "If the user approves: run `touch .opencode/verify-bash-next-approved` (one-shot bypass) and retry the EXACT same command.\n" +
-            "If the user denies or wants a different approach: follow that direction.\n"
+            "If the user denies or wants a different approach: follow that direction.\n",
         )
       }
 
-      if (allows.length < minAllow) {
-        const abstainNames = abstains.map((a) => a.name).join(", ")
+      // Need ≥2 frontier ALLOW + 0 DENY + 0 abstain to permit.
+      if (stage2Allows.length < 2 || stage2Abstains.length > 0) {
         logDecision({
           verdict: "DENY",
-          reason: "insufficient-consensus",
+          reason: "stage2-insufficient",
           latencyMs,
           cmd: cmd.slice(0, 200),
-          allows: allows.length,
-          minAllow,
-          abstains: abstains.length,
-          votes,
+          stage1: stage1Votes,
+          stage2: stage2Votes,
         })
         throw new Error(
-          "\n🚫 verify-bash INSUFFICIENT CONSENSUS — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
-            "Command: " +
-            cmd +
-            "\n\n" +
-            "Only " +
-            allows.length +
-            " responder(s) said ALLOW; " +
-            abstains.length +
-            " abstained (" +
-            abstainNames +
-            "). Need ≥" +
-            minAllow +
-            " ALLOW votes.\n\n" +
-            "DO NOT retry the command. Surface this to the user verbatim and wait for direction.\n" +
-            "If the user approves: run `touch .opencode/verify-bash-next-approved` and retry.\n"
+          "\n🚫 verify-bash STAGE-2 INSUFFICIENT CONSENSUS — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
+            "Command: " + cmd + "\n\n" +
+            "Stage 1 dissent (escalated): " + dissentNote + "\n\n" +
+            "Stage 2 verdict: " + stage2Allows.length + " ALLOW, " + stage2Denies.length +
+            " DENY, " + stage2Abstains.length + " abstain. Need ≥2 ALLOW + 0 DENY + 0 abstain.\n\n" +
+            "DO NOT retry. Surface to user and wait for direction.\n",
         )
       }
 
       if (cache) cache.set(cmd, true)
       logDecision({
         verdict: "ALLOW",
-        reason: "consensus-allow",
+        reason: "stage2-pass",
         latencyMs,
         cmd: cmd.slice(0, 200),
-        allows: allows.length,
-        abstains: abstains.length,
+        stage1Flags: stage1Flags.length,
+        stage2Allows: stage2Allows.length,
       })
     },
   }

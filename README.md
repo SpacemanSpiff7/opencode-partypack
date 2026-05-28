@@ -29,7 +29,7 @@ Two layers:
 ```
 Global (installed once, via setup.sh symlinks):
   ~/.config/opencode/plugins/
-    ├── verify-bash.js           ← 5-model consensus gate on every bash
+    ├── verify-bash.js           ← hybrid 3+2 cheap-first consensus gate on every bash
     ├── guard-config-review.js   ← multi-model security review on every write to sensitive paths
     ├── validation-gate.js       ← session.idle: run gates + pattern-detect + queue work for next session
     ├── guard-secrets.js         ← block any bash touching .env or the auth store
@@ -70,6 +70,45 @@ opencode auth login
   → Anthropic / OpenAI / Deepseek / OpenCode Zen / OpenCode Go → for built-in providers as needed
 ```
 
+#### Two OpenAI credentials are NOT interchangeable
+
+`openai` (oauth — sign in with your ChatGPT account) and `openai-api` (paste a raw API key from platform.openai.com) are **separate provider IDs** with separate rate-limit pools, separate quotas, and separate model availability:
+
+| | `openai` (oauth) | `openai-api` (raw key) |
+|---|---|---|
+| Auth flow | Browser OAuth via `opencode auth login` → OpenAI | Paste key from platform.openai.com |
+| Billed to | ChatGPT subscription quota (free for Pro / Plus) | API meter (pay-per-use) |
+| Models exposed | Everything your ChatGPT account sees | Only models enabled on the **project** the key belongs to |
+| Usable in verify-bash panel | **No** — verify-bash needs a raw key for direct HTTP | **Yes** |
+
+Practical implications:
+
+- **verify-bash + the premium-orchestrator agent require `openai-api`**, not oauth. If you only logged in via OAuth, verify-bash will silently abstain on every OpenAI voter.
+- **Model availability** on `openai-api` is governed by *Project → Model limits* at [platform.openai.com/settings/organization/limits](https://platform.openai.com/settings/organization/limits). A freshly-issued key often has only a handful of models enabled. If `doctor.sh` reports HTTP 400 on the OpenAI probe, check this page first.
+- **For rate-limit isolation** (e.g. ChatGPT Pro keeps cooking when API-key quota is exhausted, or vice versa), wire both credentials and split your orchestrators between them. The shipped `orchestrator-gpt` (oauth) and `orchestrator-gpt-xtra` (API key) already do this.
+
+#### Tuning the verify-bash panel per project
+
+If the default panel (`gpt-5.4` + `gpt-5.4-mini` + `claude-opus-4-6` + `claude-sonnet-4-6` + `claude-haiku-4-5` + `deepseek-v4-pro`) doesn't match what your account exposes, drop a `.opencode/verify-bash.config.json` in your project:
+
+```json
+{
+  "models": [
+    { "provider": "openai-api",         "model": "gpt-5.5" },
+    { "provider": "openai-api",         "model": "gpt-5.4-mini" },
+    { "provider": "anthropic-personal", "model": "claude-opus-4-6" },
+    { "provider": "anthropic-personal", "model": "claude-sonnet-4-6" },
+    { "provider": "anthropic-personal", "model": "claude-haiku-4-5" }
+  ],
+  "minAllow": 3
+}
+```
+
+Rules of thumb:
+- Pick across **generations and providers** for diversity — same-family voters share blind spots.
+- Reserve expensive models (`gpt-5.5-pro`, `claude-opus-4-6`) for orchestrators, **not** for verify-bash — the panel runs on every bash command. Cheap fast models (`gpt-5.4-mini`, `claude-haiku-4-5`) are usually plenty.
+- `minAllow: 3` of 5–6 voters is a good baseline. Lower it if too many abstentions cause `INSUFFICIENT CONSENSUS` errors; raise it for stricter consensus.
+
 ---
 
 ## Scaffold a new project
@@ -105,7 +144,7 @@ Plugin updates take effect on the next opencode restart in every project — sym
 
 | Plugin | Purpose |
 |---|---|
-| **`verify-bash`** | 5-model parallel consensus on every non-trivial bash command (GPT-5.4 / 5.4-mini + Sonnet 4.6 / Haiku 4.5 + DeepSeek V4-Pro). LRU cache, fetch timeout, classification log, configurable panel + thresholds. |
+| **`verify-bash`** | Hybrid 3+2 consensus on every non-trivial bash command: Stage 1 (haiku-4.5 + deepseek-v4-flash, $0.0005, ~700ms) flags anything suspicious; Stage 2 frontier (sonnet-4.6 + gpt-5.4 + deepseek-v4-pro) sees the cheap dissent reasoning and decides. LRU cache, fetch timeout, classification log, configurable panel + thresholds. |
 | **`validation-gate`** | On `session.idle`: runs project gates (lint/test/build), pattern-detects across trace.log + verify-bash.log, writes per-session summary, appends actionable findings to `NEXT-SESSION.md` for the next session to pick up. |
 | **`guard-secrets`** | Blocks any bash referencing `.env` or `~/.local/share/opencode/` (the auth store). |
 | **`block-inline-scripts`** | Rejects `node -e` / `python -c` form — forces script files (reviewable, reusable). |
