@@ -78,7 +78,7 @@ opencode auth login
 |---|---|---|
 | Auth flow | Browser OAuth via `opencode auth login` → OpenAI | Paste key from platform.openai.com |
 | Billed to | ChatGPT subscription quota (free for Pro / Plus) | API meter (pay-per-use) |
-| Models exposed | Everything your ChatGPT account sees | Only models enabled on the **project** the key belongs to |
+| Models exposed | Models available to your ChatGPT plan tier | Only models enabled on the **project** the key belongs to |
 | Usable in verify-bash panel | **No** — verify-bash needs a raw key for direct HTTP | **Yes** |
 
 Practical implications:

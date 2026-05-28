@@ -250,7 +250,7 @@ async function callOpenAI(bearer, model, sentry, body, timeoutMs) {
         headers: { Authorization: "Bearer " + bearer, "content-type": "application/json" },
         body: JSON.stringify({
           model,
-          max_tokens: 200,
+          max_completion_tokens: 200, // GPT-5.x reasoning models require max_completion_tokens; older accept both
           messages: [
             { role: "system", content: sentry },
             { role: "user", content: body },
