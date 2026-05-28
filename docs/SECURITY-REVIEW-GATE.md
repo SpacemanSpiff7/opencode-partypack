@@ -124,7 +124,7 @@ on insufficient consensus.
 - All gated behind sensitive-path filter, so most writes pay $0
 
 **Cache:** SHA-256(path + unified diff). Identical re-proposal within 24h hits
-cache, no re-bill. Cache lives in `.opencode/logs/guard-config-review.cache.json`.
+cache, no re-bill. Cache lives in `.opencode/guard-config-review.cache.json`.
 
 ---
 

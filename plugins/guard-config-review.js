@@ -41,7 +41,7 @@
 //   This is intentional — the user picked paranoid over convenient (2026-05-28).
 //
 // CACHE: sha256(absPath + diff) → verdict. 24h TTL. Identical re-proposals don't
-// re-bill the panel. Cache file: .opencode/logs/guard-config-review.cache.json.
+// re-bill the panel. Cache file: .opencode/guard-config-review.cache.json.
 //
 // LOG: every decision appended to .opencode/logs/guard-config-review.log as one
 // JSON line.
@@ -81,6 +81,15 @@ const STAGE2_DEFAULT = [
 const SENSITIVE_PATTERNS_DEFAULT = [
   // opencode surface
   "opencode.json",
+  // guard-config-review's own state files — must be sensitive so agent-driven
+  // writes go through the gate (the plugin's own fs.writeFileSync calls bypass
+  // tools, so this only affects agent attempts).
+  ".opencode/guard-config-review.cache.json",
+  ".opencode/guard-config-review.whitelist.json",
+  ".opencode/guard-config-review.config.json",
+  ".opencode/guard-config-review-next-approved",
+  ".opencode/guard-config-review-approvals.log",
+  ".opencode/security-violations.log",
   ".opencode/opencode.json",
   ".opencode/plugins/**",
   ".opencode/INSTRUCTIONS.md",
@@ -162,6 +171,12 @@ const ALWAYS_FRONTIER_PATTERNS = [
   // Bootstrap protection: the gate must review changes to its own source.
   "plugins/guard-config-review.js",
   "lib/llm-panel.js",
+  // Plugin state files — agent-driven writes to these are highest-stakes
+  // (cache poisoning = silent bypass of all future reviews).
+  ".opencode/guard-config-review.cache.json",
+  ".opencode/guard-config-review.whitelist.json",
+  ".opencode/security-violations.log",
+  ".opencode/guard-config-review-approvals.log",
 ]
 
 const DEFAULT_SENTRY = [
@@ -528,7 +543,7 @@ function classifyStage2(name, verdict) {
 // ---------- Cache (disk-backed, 24h TTL) ----------
 
 function makeCache(root, enabled) {
-  const cachePath = path.join(root, ".opencode/logs/guard-config-review.cache.json")
+  const cachePath = path.join(root, ".opencode/guard-config-review.cache.json")
   let map = new Map()
   if (enabled) {
     try {
