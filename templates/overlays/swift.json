@@ -8,8 +8,6 @@
       "xcrun simctl *": "allow",
       "xcrun xcresulttool *": "allow",
       "swiftlint *": "allow",
-      "axe *": "allow",
-      "/opt/homebrew/bin/axe *": "allow",
       "open -a Simulator": "allow",
       "killall Simulator": "allow",
       "pkill Simulator": "allow",
