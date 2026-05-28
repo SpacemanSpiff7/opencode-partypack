@@ -445,6 +445,26 @@ The only stronger defense is OS-level sandboxing, which breaks the Xcode/Simulat
 
 ---
 
+
+## Development
+
+Tests run on every `git commit` via a pre-commit hook installed by `npm install`. The hook is checked in at `hooks/pre-commit`; `package.json`'s `prepare` script wires git's `core.hooksPath` to it.
+
+```bash
+git clone https://github.com/SpacemanSpiff7/opencode-partypack.git
+cd opencode-partypack
+npm install   # also runs `git config core.hooksPath hooks`
+```
+
+Now every commit runs `npm test` first. If any test fails, the commit aborts. Bypass with `git commit --no-verify` if you genuinely need to (e.g., committing a WIP test that intentionally fails).
+
+Run the suite manually:
+
+```bash
+npm test           # one-shot
+npm run test:watch # watch mode
+```
+
 ## License
 
 MIT. See `LICENSE`.
