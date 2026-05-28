@@ -3,6 +3,36 @@
 Universal opencode setup. Plugins install once as global symlinks; new projects
 get the matching config + docs with one command.
 
+## Caveats — read before you ship this anywhere serious
+
+**1. opencode #5894 — subagent hooks don't fire.**
+`tool.execute.before` / `tool.execute.after` are NOT triggered for subagents
+spawned via the `task` tool. So `verify-bash`, `guard-secrets`,
+`block-inline-scripts`, and `trace-log` cover the **primary agent only**. To
+keep parallel work safe, the orchestrator prompts in the base config keep
+builds in the orchestrator's lane and all subagents read-only. If you write
+new agents, follow that pattern or your guards silently won't fire.
+
+**2. Claude Code coexistence.**
+If you also use Claude Code (`.claude/`) in the same repo, both runtimes can
+race on `xcodebuild` / lint hooks / staged-file edits. The harness has no
+build lock (yet) — do not run opencode and Claude Code concurrently in the
+same worktree on build-heavy projects, or you'll hit the simulator-crash /
+half-applied-edit class of bug.
+
+**3. verify-bash is opt-out per project via `.opencode/verify-bash.config.json`.**
+The plugin runs by default if the file is absent (matches the harness's
+"max safety" stance). To disable: set `"enabled": false` in that file, OR
+launch opencode with `OPENCODE_VERIFY_BASH=off`.
+
+**4. Model IDs drift.**
+The verify-bash default panel hardcodes `gpt-5.5 / gpt-5.4 / gpt-5.4-mini /
+claude-opus-4-6 / claude-sonnet-4-6 / claude-haiku-4-5`. If/when these are
+retired or renamed, override the `models` array in
+`.opencode/verify-bash.config.json` — don't edit the plugin source.
+
+---
+
 ## One-time install (or on a new machine)
 
 ```bash

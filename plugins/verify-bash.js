@@ -1,52 +1,52 @@
-// verify-bash — 6-MODEL CONSENSUS gate for bash commands (Architecture B from HARNESS.md).
+// verify-bash — N-model CONSENSUS gate for bash commands (Architecture B).
 //
-// MAXIMUM-DETERMINISM MODE: nearly every bash command is sent to a 6-model
-// panel. Only zero-argument, zero-side-effect trivia (pwd / whoami / date /
-// hostname) skip the LLM. Arguments matter (`ls /etc/`, `cat .env`, etc.) so
-// argument-bearing forms always go to the panel.
+// v2 — generic + configurable + observable + cached + timeout-bounded.
 //
-// 6-MODEL PARALLEL CONSENSUS — top OpenAI + Anthropic only, no DeepSeek.
-// Cheaper tiers added so the panel is broader (better blind-spot coverage)
-// without breaking the cost budget. ICE / Iterative Consensus Ensemble pattern:
-// more diverse voices catch more errors.
+// CONFIG (per project, optional): `.opencode/verify-bash.config.json`
+//   {
+//     "enabled": true,                       // false = no-op
+//     "minAllow": 3,                         // minimum ALLOW votes required
+//     "timeoutMs": 12000,                    // per-call fetch deadline
+//     "cacheMax": 256,                       // LRU size; 0 = no cache
+//     "safePatterns": ["^make help$", ...],  // extra regex patterns to skip
+//     "sentryPrompt": "...optional override...",
+//     "models": [                            // override default panel
+//       { "provider": "openai-api",         "model": "gpt-5.5" },
+//       { "provider": "openai-api",         "model": "gpt-5.4" },
+//       { "provider": "openai-api",         "model": "gpt-5.4-mini" },
+//       { "provider": "anthropic-personal", "model": "claude-opus-4-6" },
+//       { "provider": "anthropic-personal", "model": "claude-sonnet-4-6" },
+//       { "provider": "anthropic-personal", "model": "claude-haiku-4-5" }
+//     ]
+//   }
 //
-//   OpenAI (via auth.openai-api API key):
-//     • gpt-5.5         — flagship
-//     • gpt-5.4         — mid
-//     • gpt-5.4-mini    — cheap
+// If a configured provider has no credential in auth.json, that model abstains
+// (the consensus degrades gracefully — never crashes).
 //
-//   Anthropic (via auth.anthropic-personal API key):
-//     • claude-opus-4-6    — flagship
-//     • claude-sonnet-4-6  — mid
-//     • claude-haiku-4-5   — cheap
-//
-// All six called CONCURRENTLY via Promise.all → total latency ≈ slowest model,
-// not 6× single-call latency.
-//
-// STRICT CONSENSUS DECISION RULE — paranoid by default:
-//   • At least 3 models must respond with ALLOW AND zero models say DENY → ALLOW.
-//   • ANY model says DENY → DENY (block, cite the dissenters).
-//   • Fewer than 3 ALLOW responses → DENY (insufficient consensus).
+// STRICT CONSENSUS:
+//   • ANY DENY → block (cite all dissenters).
+//   • ≥minAllow ALLOW AND 0 DENY → allow.
+//   • Fewer than minAllow ALLOW → block (insufficient consensus).
 //   • Unparseable response → counted as DENY.
-//   • All 6 abstain (network/auth/rate-limit on every rung) → fall through to
-//     opencode's native `ask` permission (user decides).
+//   • All models abstain → fall through to opencode native ask.
 //
-// SAFETY GUARANTEES
-//   - Never silently allows a command any panel member said DENY for.
-//   - On total panel failure, defers to opencode's existing permission flow —
-//     never blocks unexpectedly when classifiers are unreachable.
-//   - Coexists with guard-secrets / guard-xcodebuild / git-safety; those run
-//     first and may throw before this plugin runs.
+// LRU CACHE (in-memory, session-scoped, ALLOWs only):
+//   First time you see `git status` → full panel runs. Rest of the session it's
+//   a cache hit at ~0ms. DENYs are never cached (policy may evolve).
 //
-// CAVEAT #5894
-//   tool.execute.* hooks DON'T fire for `task`-spawned subagents — this plugin
-//   covers PRIMARY-agent bash only. Pairs with subagents-read-only and
-//   xcodebuild-serialized-through-orchestrator policies in HARNESS.md.
+// CLASSIFICATION LOG: every decision is appended to
+//   `.opencode/logs/verify-bash.log` as one JSON line. Auditable trail.
 //
-// TUNING
-//   - SAFE_RE — patterns that skip the panel. Keep MINIMAL.
-//   - SENTRY — the policy the panel follows. The detailed rulebook is here.
-//   - OPENCODE_VERIFY_BASH=off — kill switch.
+// FETCH TIMEOUT: each model has its own AbortSignal. A hung provider can't
+// block the panel — it just abstains.
+//
+// ENV TUNING:
+//   • OPENCODE_VERIFY_BASH=off       — kill switch (overrides config.enabled).
+//   • OPENCODE_VERIFY_BASH_NOCACHE=1 — disable cache regardless of config.
+//   • OPENCODE_VERIFY_BASH_TIMEOUT=ms — override timeout regardless of config.
+//
+// CAVEAT (opencode #5894): tool.execute.* hooks DON'T fire for task-spawned
+// subagents. This plugin covers PRIMARY-agent bash only.
 
 import fs from "node:fs"
 import os from "node:os"
@@ -54,14 +54,24 @@ import path from "node:path"
 
 const AUTH_PATH = path.join(os.homedir(), ".local/share/opencode/auth.json")
 const DISABLED = process.env.OPENCODE_VERIFY_BASH === "off"
+const NOCACHE_ENV = process.env.OPENCODE_VERIFY_BASH_NOCACHE === "1"
+const TIMEOUT_ENV = Number(process.env.OPENCODE_VERIFY_BASH_TIMEOUT || 0) || null
 
-// MINIMAL safe list — only exact, zero-argument, zero-side-effect commands.
-const SAFE_RE = /^\s*(pwd|whoami|hostname|date)\s*$/
+// Always-safe — exact, zero-argument, zero-side-effect.
+const ALWAYS_SAFE_RE = /^\s*(pwd|whoami|hostname|date)\s*$/
 
-const SENTRY = [
-  "You are a bash safety classifier for an opencode coding agent working in the",
-  "curlbro-app iOS/SwiftUI repo. The user wants MAXIMUM DETERMINISM and SAFETY.",
-  "Assume nothing. When in doubt — DENY.",
+const DEFAULT_MODELS = [
+  { provider: "openai-api", model: "gpt-5.5" },
+  { provider: "openai-api", model: "gpt-5.4" },
+  { provider: "openai-api", model: "gpt-5.4-mini" },
+  { provider: "anthropic-personal", model: "claude-opus-4-6" },
+  { provider: "anthropic-personal", model: "claude-sonnet-4-6" },
+  { provider: "anthropic-personal", model: "claude-haiku-4-5" },
+]
+
+const DEFAULT_SENTRY = [
+  "You are a bash safety classifier for an opencode coding agent. The user wants",
+  "MAXIMUM DETERMINISM and SAFETY. Assume nothing. When in doubt — DENY.",
   "",
   "REPLY FORMAT — EXACTLY one line:",
   "  ALLOW: <one-line reason>",
@@ -79,7 +89,7 @@ const SENTRY = [
   "PRIVILEGE ESCALATION:",
   "  • `sudo`, `doas`, `su`, `pfctl`, anything that asks for elevated privileges.",
   "",
-  "SHELL-INJECTION BYPASSES (used to defeat other guards):",
+  "SHELL-INJECTION BYPASSES:",
   "  • `bash -c`, `sh -c`, `zsh -c`, `dash -c`, `csh -c`.",
   "  • `eval`, `source <(...)`, `. <(...)` of dynamic content.",
   "  • `base64 -d | sh`, `xxd -r | bash`, any decode-then-execute pipeline.",
@@ -114,58 +124,35 @@ const SENTRY = [
   "SYSTEM MUTATION:",
   "  • `defaults write` (macOS user defaults).",
   "  • `launchctl load`, `launchctl unload`.",
-  "  • `brew uninstall` of a system-shared package.",
-  "  • Background daemon launching, `nohup`, `disown`.",
+  "  • Background daemon launching: `nohup`, `disown`.",
   "",
   "EGRESS TO UNTRUSTED HOSTS:",
-  "  • `curl`, `wget`, `nc`, `netcat`, `socat`, `ssh`, `scp`, `rsync` to a host that is",
-  "    not a recognized dev resource (github.com, api.github.com, raw.githubusercontent.com,",
+  "  • `curl`, `wget`, `nc`, `netcat`, `socat`, `ssh`, `scp`, `rsync` to a host not",
+  "    a recognized dev resource (github.com, api.github.com, raw.githubusercontent.com,",
   "    apple.com / *.apple.com, swift.org, registry.npmjs.org, anthropic.com,",
   "    api.openai.com, api.deepseek.com, opencode.ai).",
   "",
-  "DEPENDENCY INSTALLATION (these need user approval, not yours):",
+  "DEPENDENCY INSTALLATION (need user approval, not yours):",
   "  • `brew install`, `npm install`, `npm i`, `pip install`, `gem install`, `cargo install`.",
   "",
   "UNREADABLE / OBFUSCATED COMMANDS:",
   "  • Anything you cannot understand at a glance — DENY.",
-  "  • Heredocs that hide content; redirection to unusual paths; multi-stage pipes",
-  "    where intent is unclear.",
   "",
-  "------- ALLOW (only when CLEARLY fitting this list) -------",
-  "",
-  "  • Read-only inspection of REPO files (not .env / not secrets): `ls`, `cat`,",
-  "    `head`, `tail`, `wc`, `grep`/`rg`/`sed -n` over repo paths.",
-  "  • Read-only inspection outside the repo IF the path is the documented",
-  "    web-app reference: `~/Documents/GitHub/curlbro/workout-builder/`.",
-  "  • Read-only git: `git status`, `git log`, `git diff`, `git show`,",
-  "    `git ls-tree`, `git check-ignore`.",
-  "  • Git mutations to in-repo state with concrete arguments: `git add <paths>`,",
-  "    `git commit -m \"...\"`, `git switch <branch>`, `git checkout <branch>`",
-  "    (NOT --force), `git stash`, `git mv`, `git fetch`, `git pull`,",
-  "    `git push` (NOT --force).",
-  "  • Read-only `gh`: `pr view/list/diff/checks/status`, `issue view/list`,",
-  "    `release view/list`, `api` for read-only endpoints.",
-  "  • Build/test toolchain: `xcodebuild` (build/test, NOT clean/destroy),",
-  "    `xcodegen generate`, `xcrun simctl` (list/boot/install/launch/screenshot",
-  "    — NOT `erase all`), `xcrun xcresulttool`, `swiftlint`.",
-  "  • Project scripts: `scripts/sim.sh ...`, `scripts/catalog.sh ...`,",
-  "    `scripts/qa/run-scenario.sh ...`, `scripts/qa/parallel-scenarios.sh ...`,",
-  "    `npm run validate-catalog`, `npm run test-catalog`,",
-  "    `node scripts/<path>`, `python3 scripts/<path>` (path must be in scripts/).",
-  "  • Simulator control: `open -a Simulator`, `killall Simulator`,",
-  "    `pkill Simulator`.",
-  "  • Path creation in repo: `mkdir -p <repo-path>`, `touch <repo-path>`.",
-  "  • UI testing: `axe ...`.",
-  "  • Screenshot viewing: `open .opencode/screenshots/*.png`.",
+  "------- ALLOW (only when CLEARLY fitting) -------",
+  "  • Read-only repo inspection: `ls`, `cat`, `head`, `tail`, `wc`, `grep`/`rg`/`sed -n` over repo paths.",
+  "  • Read-only git: status / log / diff / show / ls-tree / check-ignore.",
+  "  • Git mutations with concrete arguments: add / commit -m / switch / checkout <branch> (NOT --force) /",
+  "    stash / mv / fetch / pull / push (NOT --force).",
+  "  • Read-only gh: pr/issue/release view/list/diff/checks/status; gh api read-only endpoints.",
+  "  • Build/test toolchain (whatever the project uses) with project-shape arguments.",
+  "  • In-repo path creation: `mkdir -p <repo-path>`, `touch <repo-path>`.",
   "",
   "------- DECISION RULE -------",
+  "If on the ALLOW list AND arguments clearly scoped to the repo AND nothing in",
+  "HARD DENY matches — ALLOW. Otherwise — DENY.",
   "",
-  "If the command is on the ALLOW list AND its arguments are clearly scoped to",
-  "the repo (or the web-app reference) AND nothing in HARD DENY matches —",
-  "ALLOW. Otherwise — DENY.",
-  "",
-  "Be CONSERVATIVE. A false-DENY costs the user one re-run. A false-ALLOW can",
-  "leak secrets, delete files, or push bad code. Always prefer DENY.",
+  "Be CONSERVATIVE. A false-DENY costs the user one re-run. A false-ALLOW can leak",
+  "secrets, delete files, or push bad code. Always prefer DENY.",
 ].join("\n")
 
 function loadAuth() {
@@ -176,29 +163,49 @@ function loadAuth() {
   }
 }
 
+function loadConfig(root) {
+  const p = path.join(root, ".opencode/verify-bash.config.json")
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"))
+  } catch {
+    return {}
+  }
+}
+
 function getApiKey(auth, provider) {
   const e = auth?.[provider]
   if (!e) return null
   return e.key || e.apiKey || e.api_key || null
 }
 
-async function callOpenAI(bearer, model, body) {
+async function fetchWithTimeout(url, init, timeoutMs) {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
   try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + bearer,
-        "content-type": "application/json",
+    return await fetch(url, { ...init, signal: ac.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function callOpenAI(bearer, model, sentry, body, timeoutMs) {
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { Authorization: "Bearer " + bearer, "content-type": "application/json" },
+        body: JSON.stringify({
+          model,
+          max_tokens: 200,
+          messages: [
+            { role: "system", content: sentry },
+            { role: "user", content: body },
+          ],
+        }),
       },
-      body: JSON.stringify({
-        model,
-        max_tokens: 200,
-        messages: [
-          { role: "system", content: SENTRY },
-          { role: "user", content: body },
-        ],
-      }),
-    })
+      timeoutMs
+    )
     if (!res.ok) return null
     const j = await res.json()
     return j?.choices?.[0]?.message?.content || null
@@ -207,22 +214,26 @@ async function callOpenAI(bearer, model, body) {
   }
 }
 
-async function callAnthropic(key, model, body) {
+async function callAnthropic(key, model, sentry, body, timeoutMs) {
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+    const res = await fetchWithTimeout(
+      "https://api.anthropic.com/v1/messages",
+      {
+        method: "POST",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 200,
+          system: sentry,
+          messages: [{ role: "user", content: body }],
+        }),
       },
-      body: JSON.stringify({
-        model,
-        max_tokens: 200,
-        system: SENTRY,
-        messages: [{ role: "user", content: body }],
-      }),
-    })
+      timeoutMs
+    )
     if (!res.ok) return null
     const j = await res.json()
     return j?.content?.[0]?.text || null
@@ -231,115 +242,214 @@ async function callAnthropic(key, model, body) {
   }
 }
 
-// Classify one model's verdict. Returns { name, status: 'allow'|'deny'|'abstain', detail }.
+function callModel(spec, auth, sentry, body, timeoutMs) {
+  if (spec.provider === "openai-api") {
+    const key = getApiKey(auth, "openai-api")
+    if (!key) return Promise.resolve(null)
+    return callOpenAI(key, spec.model, sentry, body, timeoutMs)
+  }
+  if (spec.provider === "anthropic-personal") {
+    const key = getApiKey(auth, "anthropic-personal")
+    if (!key) return Promise.resolve(null)
+    return callAnthropic(key, spec.model, sentry, body, timeoutMs)
+  }
+  return Promise.resolve(null)
+}
+
 function classify(name, verdict) {
-  if (!verdict) return { name, status: "abstain", detail: "no response (network/auth/rate-limit)" }
+  if (!verdict)
+    return { name, status: "abstain", detail: "no response (network/auth/rate-limit/timeout)" }
   const v = verdict.trim().split("\n")[0]
   if (/^ALLOW\b/i.test(v)) return { name, status: "allow", detail: v }
   if (/^DENY\b/i.test(v)) return { name, status: "deny", detail: v }
-  // Unparseable response → treated as DENY for safety.
   return { name, status: "deny", detail: "unparseable response: " + v }
 }
 
-export default async ({ worktree, directory }) => ({
-  "tool.execute.before": async (input, output) => {
-    if (DISABLED) return
-    const tool = output?.tool ?? input?.tool ?? ""
-    if (tool !== "bash") return
-    const cmd = String(input?.args?.command ?? output?.args?.command ?? "")
-    if (!cmd) return
-    if (SAFE_RE.test(cmd)) return // truly trivial — no LLM call
+function makeLRU(max) {
+  if (!max || max <= 0) return null
+  const m = new Map()
+  return {
+    get(k) {
+      if (!m.has(k)) return undefined
+      const v = m.get(k)
+      m.delete(k)
+      m.set(k, v)
+      return v
+    },
+    set(k, v) {
+      if (m.has(k)) m.delete(k)
+      m.set(k, v)
+      if (m.size > max) m.delete(m.keys().next().value)
+    },
+    has(k) {
+      return m.has(k)
+    },
+  }
+}
 
-    // One-shot user approval. When the user explicitly approves a previously
-    // denied command, the orchestrator (or the user) creates this file. Plugin
-    // consumes (deletes) it on the next bash call, logs the approval, and lets
-    // that bash through without classifying. The file is gone immediately, so
-    // it's TRULY one-shot — the very next bash call goes back to consensus.
-    const root = worktree || directory || process.cwd()
-    const APPROVAL_FILE = path.join(root, ".opencode/verify-bash-next-approved")
-    const APPROVAL_LOG = path.join(root, ".opencode/verify-bash-approvals.log")
-    if (fs.existsSync(APPROVAL_FILE)) {
+export default async ({ worktree, directory }) => {
+  const root = worktree || directory || process.cwd()
+  const config = loadConfig(root)
+  const enabled = !DISABLED && config.enabled !== false
+  const models = Array.isArray(config.models) && config.models.length > 0 ? config.models : DEFAULT_MODELS
+  const minAllow = Number.isInteger(config.minAllow) ? config.minAllow : 3
+  const timeoutMs = TIMEOUT_ENV || Number(config.timeoutMs) || 12000
+  const cacheMax = NOCACHE_ENV ? 0 : Number.isInteger(config.cacheMax) ? config.cacheMax : 256
+  const sentry = typeof config.sentryPrompt === "string" ? config.sentryPrompt : DEFAULT_SENTRY
+  const extraSafe = (Array.isArray(config.safePatterns) ? config.safePatterns : [])
+    .map((p) => {
       try {
-        fs.unlinkSync(APPROVAL_FILE)
-        fs.mkdirSync(path.dirname(APPROVAL_LOG), { recursive: true })
-        fs.appendFileSync(
-          APPROVAL_LOG,
-          JSON.stringify({
-            ts: new Date().toISOString(),
-            cmd,
-            mode: "one-shot-user-approval",
-          }) + "\n"
-        )
+        return new RegExp(p)
       } catch {
-        /* don't block on logging failures */
+        return null
       }
-      return // user-approved this single command — bypass the panel
+    })
+    .filter(Boolean)
+
+  const LOG_PATH = path.join(root, ".opencode/logs/verify-bash.log")
+  const APPROVAL_FILE = path.join(root, ".opencode/verify-bash-next-approved")
+  const APPROVAL_LOG = path.join(root, ".opencode/verify-bash-approvals.log")
+  const cache = makeLRU(cacheMax)
+
+  function logDecision(entry) {
+    try {
+      fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true })
+      fs.appendFileSync(LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n")
+    } catch {
+      /* never block on logging */
     }
+  }
 
-    const auth = loadAuth()
-    if (!auth) return // no creds → fall through to opencode native ask
+  return {
+    "tool.execute.before": async (input, output) => {
+      if (!enabled) return
+      const tool = output?.tool ?? input?.tool ?? ""
+      if (tool !== "bash") return
+      const cmd = String(input?.args?.command ?? output?.args?.command ?? "")
+      if (!cmd) return
 
-    const openaiKey = getApiKey(auth, "openai-api")
-    const anthroKey = getApiKey(auth, "anthropic-personal")
+      if (ALWAYS_SAFE_RE.test(cmd) || extraSafe.some((re) => re.test(cmd))) {
+        logDecision({ verdict: "ALLOW", reason: "safe-pattern", cmd: cmd.slice(0, 200) })
+        return
+      }
 
-    const body =
-      "Proposed bash command (classify per policy):\n" +
-      cmd +
-      "\n\nReply EXACTLY one line: ALLOW: <reason> or DENY: <reason>."
+      if (fs.existsSync(APPROVAL_FILE)) {
+        try {
+          fs.unlinkSync(APPROVAL_FILE)
+          fs.mkdirSync(path.dirname(APPROVAL_LOG), { recursive: true })
+          fs.appendFileSync(
+            APPROVAL_LOG,
+            JSON.stringify({ ts: new Date().toISOString(), cmd, mode: "one-shot-user-approval" }) + "\n"
+          )
+        } catch {
+          /* don't block on logging */
+        }
+        logDecision({ verdict: "ALLOW", reason: "one-shot-user-approval", cmd: cmd.slice(0, 200) })
+        return
+      }
 
-    // 6-model panel — all CONCURRENT. Each may resolve to null (abstain).
-    const panel = await Promise.all([
-      openaiKey ? callOpenAI(openaiKey, "gpt-5.5", body) : Promise.resolve(null),
-      openaiKey ? callOpenAI(openaiKey, "gpt-5.4", body) : Promise.resolve(null),
-      openaiKey ? callOpenAI(openaiKey, "gpt-5.4-mini", body) : Promise.resolve(null),
-      anthroKey ? callAnthropic(anthroKey, "claude-opus-4-6", body) : Promise.resolve(null),
-      anthroKey ? callAnthropic(anthroKey, "claude-sonnet-4-6", body) : Promise.resolve(null),
-      anthroKey ? callAnthropic(anthroKey, "claude-haiku-4-5", body) : Promise.resolve(null),
-    ])
+      if (cache && cache.has(cmd)) {
+        logDecision({ verdict: "ALLOW", reason: "cache-hit", cmd: cmd.slice(0, 200) })
+        return
+      }
 
-    const votes = [
-      classify("gpt-5.5", panel[0]),
-      classify("gpt-5.4", panel[1]),
-      classify("gpt-5.4-mini", panel[2]),
-      classify("opus-4.6", panel[3]),
-      classify("sonnet-4.6", panel[4]),
-      classify("haiku-4.5", panel[5]),
-    ]
+      const auth = loadAuth()
+      if (!auth) {
+        logDecision({ verdict: "FALLTHROUGH", reason: "no-auth.json", cmd: cmd.slice(0, 200) })
+        return
+      }
 
-    const denies = votes.filter((v) => v.status === "deny")
-    const allows = votes.filter((v) => v.status === "allow")
-    const abstains = votes.filter((v) => v.status === "abstain")
+      const body =
+        "Proposed bash command (classify per policy):\n" +
+        cmd +
+        "\n\nReply EXACTLY one line: ALLOW: <reason> or DENY: <reason>."
 
-    // All abstained → no consensus possible → fall through to opencode native ask.
-    if (abstains.length === 6) return
+      const t0 = Date.now()
+      const panel = await Promise.all(models.map((m) => callModel(m, auth, sentry, body, timeoutMs)))
+      const latencyMs = Date.now() - t0
 
-    // STRICT CONSENSUS:
-    //  - ANY DENY → block (cite all dissenters).
-    //  - Need >=3 ALLOW responders to ALLOW. Otherwise DENY for insufficient consensus.
-    if (denies.length > 0) {
-      const reasons = denies.map((d) => `[${d.name}] ${d.detail}`).join(" | ")
-      throw new Error(
-        "\n🚫 verify-bash CONSENSUS DENY — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
-          "Command: " + cmd + "\n\n" +
-          "Dissenters: " + reasons + "\n\n" +
-          "DO NOT retry, rephrase, or work around this command without explicit user approval.\n" +
-          "If the user approves: run `touch .opencode/verify-bash-next-approved` (one-shot bypass) and retry the EXACT same command.\n" +
-          "If the user denies or wants a different approach: follow that direction.\n"
-      )
-    }
+      const votes = models.map((m, i) => classify(`${m.provider}/${m.model}`, panel[i]))
+      const denies = votes.filter((v) => v.status === "deny")
+      const allows = votes.filter((v) => v.status === "allow")
+      const abstains = votes.filter((v) => v.status === "abstain")
 
-    if (allows.length < 3) {
-      const abstainNames = abstains.map((a) => a.name).join(", ")
-      throw new Error(
-        "\n🚫 verify-bash INSUFFICIENT CONSENSUS — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
-          "Command: " + cmd + "\n\n" +
-          "Only " + allows.length + " responder(s) said ALLOW; " +
-          abstains.length + " abstained (" + abstainNames + "). Need ≥3 ALLOW votes.\n\n" +
-          "DO NOT retry the command. Surface this to the user verbatim and wait for direction.\n" +
-          "If the user approves: run `touch .opencode/verify-bash-next-approved` and retry.\n"
-      )
-    }
+      if (abstains.length === models.length) {
+        logDecision({
+          verdict: "FALLTHROUGH",
+          reason: "all-abstained",
+          latencyMs,
+          cmd: cmd.slice(0, 200),
+          votes,
+        })
+        return
+      }
 
-    // ≥3 ALLOW, 0 DENY → consensus ALLOW.
-  },
-})
+      if (denies.length > 0) {
+        logDecision({
+          verdict: "DENY",
+          reason: "consensus-deny",
+          latencyMs,
+          cmd: cmd.slice(0, 200),
+          allows: allows.length,
+          denies: denies.length,
+          abstains: abstains.length,
+          votes,
+        })
+        const reasons = denies.map((d) => `[${d.name}] ${d.detail}`).join(" | ")
+        throw new Error(
+          "\n🚫 verify-bash CONSENSUS DENY — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
+            "Command: " +
+            cmd +
+            "\n\n" +
+            "Dissenters: " +
+            reasons +
+            "\n\n" +
+            "DO NOT retry, rephrase, or work around this command without explicit user approval.\n" +
+            "If the user approves: run `touch .opencode/verify-bash-next-approved` (one-shot bypass) and retry the EXACT same command.\n" +
+            "If the user denies or wants a different approach: follow that direction.\n"
+        )
+      }
+
+      if (allows.length < minAllow) {
+        const abstainNames = abstains.map((a) => a.name).join(", ")
+        logDecision({
+          verdict: "DENY",
+          reason: "insufficient-consensus",
+          latencyMs,
+          cmd: cmd.slice(0, 200),
+          allows: allows.length,
+          minAllow,
+          abstains: abstains.length,
+          votes,
+        })
+        throw new Error(
+          "\n🚫 verify-bash INSUFFICIENT CONSENSUS — HARD STOP. USER APPROVAL REQUIRED.\n\n" +
+            "Command: " +
+            cmd +
+            "\n\n" +
+            "Only " +
+            allows.length +
+            " responder(s) said ALLOW; " +
+            abstains.length +
+            " abstained (" +
+            abstainNames +
+            "). Need ≥" +
+            minAllow +
+            " ALLOW votes.\n\n" +
+            "DO NOT retry the command. Surface this to the user verbatim and wait for direction.\n" +
+            "If the user approves: run `touch .opencode/verify-bash-next-approved` and retry.\n"
+        )
+      }
+
+      if (cache) cache.set(cmd, true)
+      logDecision({
+        verdict: "ALLOW",
+        reason: "consensus-allow",
+        latencyMs,
+        cmd: cmd.slice(0, 200),
+        allows: allows.length,
+        abstains: abstains.length,
+      })
+    },
+  }
+}
