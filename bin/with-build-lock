@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# with-build-lock — acquire a stale-aware file lock, run a command, release.
+#
+# Usage:  with-build-lock <lockfile> -- <command...>
+#   Default stale window: 600s.  Override:  WITH_BUILD_LOCK_STALE_S=900
+#
+# Purpose: opencode and Claude Code both call destructive build tools
+# (xcodebuild, lint hooks, file writes). Without coordination they race
+# and crash the simulator. Both runtimes wrap their build hook in:
+#
+#     with-build-lock .scratch/.build.lock -- xcodebuild build ...
+#
+# The lock is a directory (POSIX-atomic mkdir) holding a `meta` file with
+# `<PID> <ISO8601-timestamp>`. Stale locks (older than the configured window)
+# are force-cleared after a warning.
+
+set -e
+STALE_S="${WITH_BUILD_LOCK_STALE_S:-600}"
+
+LOCKFILE="$1"
+shift
+if [[ "$1" != "--" ]]; then
+  echo "usage: with-build-lock <lockfile> -- <command...>" >&2
+  exit 2
+fi
+shift
+
+LOCKDIR="${LOCKFILE%.lock}.lockdir"
+META="$LOCKDIR/meta"
+
+acquire() {
+  if mkdir "$LOCKDIR" 2>/dev/null; then
+    echo "$$ $(date -u +%FT%TZ)" > "$META"
+    return 0
+  fi
+  return 1
+}
+
+is_stale() {
+  [[ ! -f "$META" ]] && return 0
+  local ts
+  ts=$(awk '{print $2}' "$META")
+  [[ -z "$ts" ]] && return 0
+  local lock_epoch now diff
+  lock_epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null || echo 0)
+  now=$(date -u +%s)
+  diff=$(( now - lock_epoch ))
+  (( diff > STALE_S ))
+}
+
+if ! acquire; then
+  if is_stale; then
+    echo "with-build-lock: stale lock at $LOCKDIR (>${STALE_S}s) — force-clearing" >&2
+    cat "$META" >&2 2>/dev/null || true
+    rm -rf "$LOCKDIR"
+    acquire || { echo "with-build-lock: failed to acquire after stale-clear" >&2; exit 3; }
+  else
+    echo "with-build-lock: lock held by another process — refusing to run" >&2
+    cat "$META" >&2 2>/dev/null
+    exit 4
+  fi
+fi
+
+trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+
+"$@"
