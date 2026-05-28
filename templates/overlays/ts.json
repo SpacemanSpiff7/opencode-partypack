@@ -1,0 +1,27 @@
+{
+  "model": "deepseek/deepseek-v4-pro",
+  "small_model": "deepseek/deepseek-v4-flash",
+  "permission": {
+    "bash": {
+      "npx *": "allow",
+      "npm test*": "allow",
+      "npm run *": "allow",
+      "node *": "allow",
+      "tsc *": "allow",
+      "pnpm *": "allow",
+      "yarn *": "ask"
+    }
+  },
+  "command": {
+    "typecheck": {
+      "description": "Run TypeScript typecheck",
+      "agent": "build-fast",
+      "template": "Run `npx tsc --noEmit $ARGUMENTS`. Report type errors only."
+    },
+    "test": {
+      "description": "Run tests (auto-detect vitest/jest/node)",
+      "agent": "build-fast",
+      "template": "Detect the test runner (vitest/jest/node:test) by reading package.json, then run tests for $ARGUMENTS (or all if empty). Summarize failures only."
+    }
+  }
+}

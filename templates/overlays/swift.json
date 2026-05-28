@@ -1,0 +1,45 @@
+{
+  "model": "deepseek/deepseek-v4-pro",
+  "small_model": "deepseek/deepseek-v4-flash",
+  "permission": {
+    "bash": {
+      "xcodebuild *": "allow",
+      "xcodegen *": "allow",
+      "xcrun simctl *": "allow",
+      "xcrun xcresulttool *": "allow",
+      "swiftlint *": "allow",
+      "axe *": "allow",
+      "/opt/homebrew/bin/axe *": "allow",
+      "open -a Simulator": "allow",
+      "killall Simulator": "allow",
+      "pkill Simulator": "allow",
+      "scripts/sim.sh *": "allow",
+      "./scripts/sim.sh *": "allow",
+      "node scripts/*": "allow",
+      "python3 scripts/*": "allow",
+      "npm run *": "allow"
+    }
+  },
+  "command": {
+    "build": {
+      "description": "xcodebuild build (compile check)",
+      "agent": "build-fast",
+      "template": "Run `xcodebuild build -scheme <YOUR-SCHEME> -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData` and report ERRORS only. NEVER run in parallel with another xcodebuild."
+    },
+    "test": {
+      "description": "xcodebuild test",
+      "agent": "build-fast",
+      "template": "Run xcodebuild test for the scheme $ARGUMENTS, -derivedDataPath DerivedData -parallel-testing-enabled NO. Summarize failures only. NEVER run in parallel with another xcodebuild."
+    },
+    "lint": {
+      "description": "Run SwiftLint",
+      "agent": "build-fast",
+      "template": "Run `swiftlint lint --quiet $ARGUMENTS` from the repo root. If $ARGUMENTS is empty, lint all staged .swift files."
+    },
+    "sim-shot": {
+      "description": "Capture simulator screenshots",
+      "agent": "build-fast",
+      "template": "Run `scripts/sim.sh shot $ARGUMENTS` and inspect the screenshots."
+    }
+  }
+}

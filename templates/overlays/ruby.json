@@ -1,0 +1,26 @@
+{
+  "model": "deepseek/deepseek-v4-pro",
+  "small_model": "deepseek/deepseek-v4-flash",
+  "permission": {
+    "bash": {
+      "bundle exec rubocop *": "allow",
+      "bundle exec rspec *": "allow",
+      "DISABLE_AWS_SECRETS=1 spring rspec *": "allow",
+      "rake *": "allow",
+      "bundle install": "ask",
+      "rails *": "ask"
+    }
+  },
+  "command": {
+    "spec": {
+      "description": "Run RSpec",
+      "agent": "build-fast",
+      "template": "Run `bundle exec rspec $ARGUMENTS`. Summarize failures only."
+    },
+    "rubocop": {
+      "description": "Run RuboCop",
+      "agent": "build-fast",
+      "template": "Run `bundle exec rubocop $ARGUMENTS`. Report violations only; do NOT auto-fix unless I say so."
+    }
+  }
+}

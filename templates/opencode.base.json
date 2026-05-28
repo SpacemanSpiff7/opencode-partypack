@@ -1,0 +1,390 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/INSTRUCTIONS.md"
+  ],
+  "watcher": {
+    "ignore": [
+      ".opencode/node_modules/**",
+      ".opencode/screenshots/**",
+      ".opencode/logs/**"
+    ]
+  },
+  "mcp": {
+    "ast-grep": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@ast-grep/mcp"
+      ],
+      "enabled": true,
+      "environment": {}
+    },
+    "context7": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
+      "enabled": true,
+      "environment": {}
+    }
+  },
+  "permission": {
+    "read": {
+      "*": "allow",
+      ".env": "deny",
+      ".env.*": "deny",
+      "**/.env": "deny",
+      "**/.env.*": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      "scripts/**": "ask",
+      ".env": "deny",
+      ".env.*": "deny",
+      "**/.env": "deny",
+      "**/.env.*": "deny"
+    },
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "task": "allow",
+    "skill": "ask",
+    "question": "allow",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "external_directory": {
+      "*": "deny"
+    },
+    "bash": {
+      "*": "ask",
+      "pwd": "allow",
+      "ls *": "allow",
+      "echo *": "allow",
+      "which *": "allow",
+      "command -v *": "allow",
+      "type *": "allow",
+      "file *": "allow",
+      "stat *": "allow",
+      "wc *": "allow",
+      "du *": "allow",
+      "df *": "allow",
+      "tree *": "allow",
+      "ps *": "allow",
+      "pgrep *": "allow",
+      "lsof *": "allow",
+      "date": "allow",
+      "uname *": "allow",
+      "whoami": "allow",
+      "hostname": "allow",
+      "cat *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "grep *": "allow",
+      "rg *": "allow",
+      "sed -n *": "allow",
+      "touch *": "allow",
+      "cp *": "allow",
+      "mkdir -p *": "allow",
+      "open .opencode/screenshots/*.png": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "git add *": "allow",
+      "git commit *": "allow",
+      "git switch *": "allow",
+      "git checkout *": "allow",
+      "git stash *": "allow",
+      "git mv *": "allow",
+      "git fetch *": "allow",
+      "git pull *": "allow",
+      "git push *": "allow",
+      "git ls-tree *": "allow",
+      "git check-ignore *": "allow",
+      "gh pr view*": "allow",
+      "gh pr list*": "allow",
+      "gh pr diff*": "allow",
+      "gh pr checks*": "allow",
+      "gh pr status*": "allow",
+      "gh issue *": "allow",
+      "gh workflow *": "allow",
+      "gh release view*": "allow",
+      "gh release list*": "allow",
+      "jq *": "allow",
+      "rm *": "ask",
+      "find * -delete*": "ask",
+      "find * -exec rm*": "ask",
+      "*xargs rm*": "ask",
+      "mv *": "ask",
+      "sed -i *": "ask",
+      "brew install*": "ask",
+      "brew uninstall*": "ask",
+      "npm install*": "ask",
+      "npm i*": "ask",
+      "npm uninstall*": "ask",
+      "npm rm*": "ask",
+      "curl *": "ask",
+      "wget *": "ask",
+      "gh api *": "ask",
+      "gh pr merge*": "ask",
+      "gh release create*": "ask",
+      "defaults write*": "ask",
+      "codex exec*": "ask",
+      "codex review*": "ask",
+      "omx exec*": "ask",
+      "omx ask*": "ask",
+      "sudo *": "deny",
+      "curl * | sh": "deny",
+      "curl * | bash": "deny",
+      "wget * | sh": "deny",
+      "wget * | bash": "deny",
+      "bash -c *": "deny",
+      "sh -c *": "deny",
+      "zsh -c *": "deny",
+      "dash -c *": "deny",
+      "env": "deny",
+      "printenv*": "deny",
+      "jq * .env*": "deny",
+      "cat .env*": "deny",
+      "cat ./.env*": "deny",
+      "* .env": "deny",
+      "* .env.*": "deny",
+      "cat ~/.local/share/opencode/*": "deny",
+      "git push --force*": "deny",
+      "git push -f*": "deny",
+      "git push * --force*": "deny",
+      "git push * -f *": "deny",
+      "git * --no-verify*": "deny",
+      "git filter-branch*": "deny",
+      "git branch -D *": "deny",
+      "git branch --delete --force*": "deny",
+      "git worktree remove --force*": "deny",
+      "git worktree remove -f *": "deny",
+      "git checkout --force*": "deny",
+      "git checkout -f *": "deny",
+      "git restore .": "deny",
+      "git submodule deinit --force*": "deny",
+      "git submodule deinit -f *": "deny",
+      "*--dangerously-skip-permissions*": "deny"
+    }
+  },
+  "provider": {
+    "anthropic-personal": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "Anthropic (Personal)",
+      "models": {
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6 (Personal)"
+        },
+        "claude-opus-4-7": {
+          "name": "Claude Opus 4.7 (Personal)"
+        },
+        "claude-opus-4-6": {
+          "name": "Claude Opus 4.6 (Personal)"
+        }
+      }
+    },
+    "openai": {
+      "options": {
+        "reasoningEffort": "xhigh"
+      }
+    },
+    "openai-api": {
+      "npm": "@ai-sdk/openai",
+      "name": "OpenAI (API key)",
+      "options": {
+        "reasoningEffort": "xhigh"
+      },
+      "models": {
+        "gpt-5.5-pro": {
+          "name": "GPT-5.5 Pro (API, xhigh)"
+        }
+      }
+    }
+  },
+  "agent": {
+    "vision": {
+      "description": "Image/screenshot/diagram analysis (read-only). Routes to Claude via the anthropic-personal provider.",
+      "mode": "subagent",
+      "model": "anthropic-personal/claude-sonnet-4-6",
+      "temperature": 0,
+      "steps": 5,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      },
+      "prompt": "You analyze screenshots, diagrams, and images. Given an image path, use the Read tool to load it and describe the visible content concisely and accurately. Keep output grounded — never describe what is not visible in the image."
+    },
+    "orchestrator": {
+      "mode": "primary",
+      "model": "anthropic-personal/claude-opus-4-6",
+      "temperature": 0,
+      "permission": {
+        "edit": "deny"
+      },
+      "prompt": "You are the lead. Keep YOUR OWN token use minimal: delegate ALL reading to `explore` and reason over summaries — never bulk-read files yourself. Route work through this COST CHAIN, escalating on rate-limit errors AND on complexity:\n\nCHEAP (no permission needed):\n  T1 `build-go`     (opencode-go/kimi-k2.6) — DEFAULT for simple/mechanical work; uses the flat Go plan first.\n  T2 `build-fast`   (deepseek-v4-pro) — when build-go errors with rate-limit/quota, OR for moderate work. Effectively unlimited at floor pricing.\n\nPAID (ASK the user before invoking each tier the FIRST time this session, then use freely until that tier's limit):\n  T3 `build-gpt`    (gpt-5.5-pro xhigh) — covered by ChatGPT Pro; once approved USE FREELY. Best for hard concurrency/architecture/security; also the failover when DeepSeek struggles.\n  T4 `build-sonnet` (Sonnet 4.6) — when GPT struggles with Claude-style judgment, or chain failover.\n  T5 `build-opus`   (Opus 4.6) — ALWAYS ask before each invocation; reserved for the genuinely hardest.\n\nOn any rate-limit/quota error from the worker, retry with the NEXT tier (and ask if it's a paid tier you haven't yet approved this session). Give each builder a NARROW scope — name the exact files/paths — and when parallelizing writers, give each a DISJOINT path set (no file locks in opencode). Run gates yourself (lint/build/tests/validate-catalog); NEVER let a subagent run xcodebuild — the guard plugin doesn't fire for subagents (#5894). Route review to a DIFFERENT family than the builder: Go/DeepSeek/Sonnet build -> `review` (GPT); GPT build -> `review-deep` (Opus). For build-go and build-fast output, cross-model review is MANDATORY. Iterate until gates are green and review passes. Do NOT orchestrate trivial one-line tasks. ALWAYS follow the Clarification gates and Anti-overengineering rules in .opencode/INSTRUCTIONS.md — batch all clarifying questions in ONE round BEFORE planning or executing, never assume on a large decision (architecture/naming/scope/dependencies/abstractions/deletions), and never add what wasn't asked for. If the task is ambiguous or two valid interpretations exist, STOP and ask. ALSO — when the verify-bash CONSENSUS DENY (or INSUFFICIENT CONSENSUS) error fires on any bash you proposed: HARD STOP. Surface the verbatim error to the user (every dissenter's reason) and wait for explicit direction. Do NOT retry, rephrase, or work around the denied command. If the user approves, run `/approve` (or `touch .opencode/verify-bash-next-approved`) which creates the one-shot bypass, then retry the EXACT same command. If the user denies, follow their direction."
+    },
+    "orchestrator-gpt": {
+      "mode": "primary",
+      "model": "openai/gpt-5.4",
+      "temperature": 0,
+      "permission": {
+        "edit": "deny"
+      },
+      "prompt": "Same lead role as `orchestrator`, on GPT-5.5-pro (xhigh) — use as a different-family coordinator than Opus, or a fallback. Keep your own tokens minimal: delegate reading to `explore`, reason over summaries. Use the SAME COST CHAIN: T1 build-go (Go-plan first) -> T2 build-fast (DeepSeek failover/workhorse) -> T3 build-gpt (Pro, free use after first approval) -> T4 build-sonnet (ask) -> T5 build-opus (ask each time). On rate-limit errors, fall through to the next tier (asking for paid tiers). Narrow/disjoint scopes for parallel writers. Run gates yourself; never let a subagent run xcodebuild. Route review to a DIFFERENT family than the builder; for GPT-built code, use `review-deep` (Opus), never GPT-on-GPT. ALWAYS follow the Clarification gates and Anti-overengineering rules in .opencode/INSTRUCTIONS.md — batch clarifying questions in ONE round before planning, never assume on large decisions, never add what wasn't asked for. When verify-bash CONSENSUS DENY (or INSUFFICIENT CONSENSUS) fires on any bash you proposed: HARD STOP. Surface the verbatim error (every dissenter's reason) and wait for explicit user direction. Do NOT retry, rephrase, or work around the denied command. If the user approves, run `/approve` to create the one-shot bypass and retry the EXACT same command. If the user denies, follow that direction."
+    },
+    "orchestrator-gpt-xtra": {
+      "mode": "primary",
+      "model": "openai-api/gpt-5.5-pro",
+      "temperature": 0,
+      "permission": {
+        "edit": "deny"
+      },
+      "prompt": "PREMIUM orchestrator — GPT-5.5-pro (xhigh) via the OpenAI API key (pay-per-use, BILLED SEPARATELY from your ChatGPT Pro subscription). Reserved for the genuinely hardest tasks where you specifically want the strongest GPT lead — do not pick this for routine work; use `orchestrator-gpt` (Codex oauth, free) instead. Same chain-dispatcher role: T1 build-go → T2 build-fast → T3 build-gpt → T4 build-sonnet → T5 build-opus, ask before paid tiers, narrow/disjoint scopes for parallel writers, run gates yourself (never let a subagent run xcodebuild — #5894), route review to a DIFFERENT family (Opus for your output). ALWAYS follow the Clarification gates and Anti-overengineering rules in .opencode/INSTRUCTIONS.md — batch clarifying questions in ONE round before planning, never assume on large decisions, never add what wasn't asked for. When verify-bash CONSENSUS DENY (or INSUFFICIENT CONSENSUS) fires on any bash you proposed: HARD STOP. Surface the verbatim error (every dissenter's reason) and wait for explicit user direction. Do NOT retry, rephrase, or work around the denied command. If the user approves, run `/approve` to create the one-shot bypass and retry the EXACT same command. If the user denies, follow that direction."
+    },
+    "build-go": {
+      "mode": "all",
+      "model": "opencode-go/kimi-k2.6",
+      "temperature": 0,
+      "description": "TIER 1 — Kimi K2.6 on the flat opencode-go plan. Use FIRST for simple/mechanical work to amortize the subscription. On rate-limit/quota error, the orchestrator falls through to build-fast (DeepSeek). Strong coder; cheapest effective."
+    },
+    "build-fast": {
+      "mode": "all",
+      "model": "deepseek/deepseek-v4-pro",
+      "temperature": 0,
+      "description": "TIER 2 — DeepSeek V4-Pro (direct, pay-per-use floor pricing $0.435/$0.87 per Mtok; effectively unlimited). Failover when build-go's Go-plan quota is hit, and the workhorse for moderate work. Frontier coding (80.6% SWE-bench, ~tied with GPT-5.5). Mandatory cross-model (GPT) review for cheap-tier output."
+    },
+    "build-sonnet": {
+      "mode": "all",
+      "model": "anthropic-personal/claude-sonnet-4-6",
+      "temperature": 0,
+      "description": "TIER 4 — Claude Sonnet 4.6 (personal API key, pay-per-use). Use when GPT struggles with Claude-style judgment, or as the chain failover when GPT-5.5-pro limits hit. Requires explicit user permission to escalate to this tier."
+    },
+    "build-gpt": {
+      "mode": "all",
+      "model": "openai/gpt-5.4",
+      "temperature": 0,
+      "description": "TIER 3 — GPT-5.5-pro (xhigh) via ChatGPT Pro (generous limits — USE FREELY once approved). Preferred for hard concurrency/architecture/security/ambiguous work AND the failover when DeepSeek struggles or its limits hit. Requires explicit user permission the FIRST time per session to escalate to this tier; after that, use freely until ChatGPT Pro limits."
+    },
+    "build-opus": {
+      "mode": "all",
+      "model": "anthropic-personal/claude-opus-4-6",
+      "temperature": 0,
+      "description": "TIER 5 — Claude Opus 4.6 (personal API key, pay-per-use). The most expensive tier — reserved for genuinely hardest reasoning/agentic work where every other tier has failed. ALWAYS requires explicit user permission per invocation."
+    },
+    "explore": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-flash",
+      "temperature": 0,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny"
+      },
+      "description": "Fast read-only recon — reads files / searches and returns a summary to the orchestrator.",
+      "prompt": "Recon only. Prefer the ast-grep MCP (find_code) for structural search over reading whole files — it is far more token-efficient. Return a concise summary (paths + key snippets), never raw file dumps."
+    },
+    "sentry": {
+      "mode": "subagent",
+      "model": "openai/gpt-5.4",
+      "temperature": 0,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny"
+      },
+      "prompt": "You are a bash safety classifier (different family from the DeepSeek/Claude executors — catch what they miss). Given a proposed bash command and brief task context, reply with EXACTLY one line:\n  ALLOW: <one-line reason>\n  DENY: <one-line reason>\nALLOW if: consistent with the stated task, no .env / auth-store / secret access, no out-of-scope mutation, no destructive surprises.\nDENY if: destructive (rm -rf, force-push, sudo), references secrets, pipes to shell, uses obfuscation (eval/base64), out of scope, or you cannot tell what it does.\nBe CONSERVATIVE — when in doubt, DENY. Do not propose alternatives unless asked."
+    },
+    "review": {
+      "mode": "subagent",
+      "model": "openai/gpt-5.4",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      },
+      "prompt": "Review the diff for correctness, edge cases, regressions, and test gaps. You are a DIFFERENT model family than the author — surface the mistakes its family tends to miss. Output severity-rated findings (CRITICAL/HIGH/MEDIUM/LOW). Do NOT edit or run mutating commands."
+    },
+    "review-deep": {
+      "mode": "subagent",
+      "model": "anthropic-personal/claude-opus-4-6",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      },
+      "prompt": "Second, independent high-stakes review (opposite family from a GPT-built diff). Report severity-rated findings; do NOT edit. The orchestrator reconciles you against the first reviewer for consensus."
+    }
+  },
+  "command": {
+    "plan": {
+      "description": "Plan a task with the orchestrator — outputs a plan, does NOT execute",
+      "agent": "orchestrator",
+      "template": "Plan only — do NOT execute. Use @explore for any recon. Produce a concise plan with: (a) the goal, (b) files to touch (narrow scope per builder), (c) which tier per piece (T1 build-go / T2 build-fast / T3 build-gpt / T4 build-sonnet / T5 build-opus), (d) gates (lint/build/tests/validate-catalog), (e) reviewer (OPPOSITE family from builder). Wait for my approval. Task: $ARGUMENTS"
+    },
+    "orchestrate": {
+      "description": "Run the full chain — orchestrator routes tiers, runs gates, cross-family review",
+      "agent": "orchestrator",
+      "template": "Full pipeline for: $ARGUMENTS. Follow the cost chain (T1→T5), ask me before paid tiers (T3 once/session, T4/T5 each invocation), run gates, route review to the opposite family, iterate until lint+build+tests+review are green."
+    },
+    "quick": {
+      "description": "Bypass the orchestrator — DeepSeek (build-fast) edits directly",
+      "agent": "build-fast",
+      "template": "Trivial edit, no orchestration. Touch ONLY the files needed for: $ARGUMENTS. Keep scope narrow. lint-on-edit will auto-fix-format; surface remaining violations."
+    },
+    "explore": {
+      "description": "Recon — @explore investigates a topic and returns a summary",
+      "agent": "orchestrator",
+      "template": "Delegate to @explore: investigate $ARGUMENTS in the codebase. Use the ast-grep MCP for structural search. Return paths + key snippets only — no raw file dumps."
+    },
+    "why": {
+      "description": "Explain something in the codebase (read-only)",
+      "agent": "orchestrator",
+      "template": "Use @explore to explain: $ARGUMENTS. Find where it lives, how it works, what depends on it. Be concise."
+    },
+    "review": {
+      "description": "Cross-model review of current diff — GPT-5.5-pro (different family from DeepSeek/Claude)",
+      "agent": "orchestrator",
+      "template": "Delegate to @review (GPT-5.5-pro xhigh) — review the current `git diff` for correctness, edge cases, regressions, test gaps. Output severity-rated findings (CRITICAL/HIGH/MEDIUM/LOW). Do not edit."
+    },
+    "review-deep": {
+      "description": "High-stakes review — Opus 4.6 (use for GPT-built diffs or risky changes)",
+      "agent": "orchestrator",
+      "template": "Delegate to @review-deep (Opus 4.6) — high-stakes review of the current `git diff` (opposite family from a GPT build). Severity-rated findings; do not edit."
+    },
+    "escalate": {
+      "description": "Bump current task to the next chain tier (or a specific one)",
+      "agent": "orchestrator",
+      "template": "Escalate to the next tier — or to `$ARGUMENTS` if I named one. Ask permission for paid tiers (T3+) not yet approved this session."
+    },
+    "commit": {
+      "description": "Atomic commit — derive a conventional-commit message if none given",
+      "agent": "build-fast",
+      "template": "Stage the relevant changes and commit with the message: $ARGUMENTS — or, if empty, derive a conventional-commit message (feat/fix/chore/docs/refactor/test) from the diff. Keep it atomic (one logical change per commit)."
+    },
+    "cheatsheet": {
+      "description": "Print the opencode cheatsheet — every command/agent/tier/skill",
+      "agent": "build-fast",
+      "template": "Run `cat .opencode/CHEATSHEET.md` and show me the contents verbatim."
+    },
+    "clarify": {
+      "description": "Interview-first — orchestrator batches ALL clarifying questions before any work",
+      "agent": "orchestrator",
+      "template": "Interview-first. Do NOT plan or execute yet. Apply the Clarification gates from .opencode/INSTRUCTIONS.md and ask EVERY relevant question in ONE batch — technical approach, naming, UI/UX choices, scope boundaries, edge cases, tradeoffs, dependencies, deletions, abstractions. If two interpretations of the task exist, surface them and ask. Use the AskUserQuestion tool if available, otherwise number the questions clearly. After my answers, produce a plan and WAIT for my approval. Task: $ARGUMENTS"
+    },
+    "scope-check": {
+      "description": "Audit current pending work for scope creep / overengineering — no execution",
+      "agent": "orchestrator",
+      "template": "Read the current git diff (or the pending plan if nothing is staged) and audit it against the Anti-overengineering rules in .opencode/INSTRUCTIONS.md. List anything that is: (a) outside the literal stated scope, (b) a new abstraction with no second consumer, (c) dead code, (d) a new file when an existing one fits, (e) future-proofing, (f) a 'cleaner' rewrite I didn't ask for. Recommend what to cut. Do NOT execute any changes."
+    },
+    "approve": {
+      "description": "One-shot approval of a verify-bash-denied command — creates the bypass file and retries",
+      "agent": "build-fast",
+      "template": "Create `.opencode/verify-bash-next-approved` (use `touch`) — this is the one-shot bypass that verify-bash consumes on the NEXT bash call. Then immediately retry the EXACT bash command that was just denied by consensus. The previously-denied command and the user's approval rationale: $ARGUMENTS"
+    }
+  }
+}
