@@ -29,7 +29,7 @@ Two layers:
 ```
 Global (installed once, via setup.sh symlinks):
   ~/.config/opencode/plugins/
-    ├── verify-bash.js           ← 6-model consensus gate on every bash
+    ├── verify-bash.js           ← 5-model consensus gate on every bash
     ├── validation-gate.js       ← session.idle: run gates + pattern-detect + queue work for next session
     ├── guard-secrets.js         ← block any bash touching .env or the auth store
     ├── block-inline-scripts.js  ← block `node -e` / `python -c` (force file-path form)
@@ -104,7 +104,7 @@ Plugin updates take effect on the next opencode restart in every project — sym
 
 | Plugin | Purpose |
 |---|---|
-| **`verify-bash`** | 6-model parallel consensus on every non-trivial bash command (GPT-5.5/5.4/5.4-mini + Opus 4.6 / Sonnet 4.6 / Haiku 4.5). LRU cache, fetch timeout, classification log, configurable panel + thresholds. |
+| **`verify-bash`** | 5-model parallel consensus on every non-trivial bash command (GPT-5.4 / 5.4-mini + Sonnet 4.6 / Haiku 4.5 + DeepSeek V4-Pro). LRU cache, fetch timeout, classification log, configurable panel + thresholds. |
 | **`validation-gate`** | On `session.idle`: runs project gates (lint/test/build), pattern-detects across trace.log + verify-bash.log, writes per-session summary, appends actionable findings to `NEXT-SESSION.md` for the next session to pick up. |
 | **`guard-secrets`** | Blocks any bash referencing `.env` or `~/.local/share/opencode/` (the auth store). |
 | **`block-inline-scripts`** | Rejects `node -e` / `python -c` form — forces script files (reviewable, reusable). |
@@ -151,7 +151,7 @@ npm test
 
 Vitest covers:
 
-- `verify-bash`: SAFE_RE bypass, 6-model consensus (allow / deny / insufficient / unparseable / all-abstain), LRU cache hit, classification log emission, `OPENCODE_VERIFY_BASH=off` short-circuit.
+- `verify-bash`: SAFE_RE bypass, 5-model consensus (allow / deny / insufficient / unparseable / all-abstain), LRU cache hit, classification log emission, `OPENCODE_VERIFY_BASH=off` short-circuit.
 - `validation-gate`: pattern detection (ast-grep underuse, DENY clustering, fallthrough warnings), gate execution, session summary serialization.
 
 ---

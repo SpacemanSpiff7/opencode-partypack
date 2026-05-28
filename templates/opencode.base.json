@@ -248,15 +248,15 @@
     },
     "build-go": {
       "mode": "all",
-      "model": "opencode-go/kimi-k2.6",
+      "model": "opencode-go/qwen3.7-max",
       "temperature": 0,
-      "description": "TIER 1 — Kimi K2.6 on the flat opencode-go plan. Use FIRST for simple/mechanical work to amortize the subscription. On rate-limit/quota error, the orchestrator falls through to build-fast (DeepSeek). Strong coder; cheapest effective."
+      "description": "TIER 1 — Qwen 3.7 Max via opencode-go (latest qwen, free flat plan). Preferred default. On rate-limit/quota → fall through to build-fast (Kimi)."
     },
     "build-fast": {
       "mode": "all",
-      "model": "deepseek/deepseek-v4-pro",
+      "model": "opencode-go/kimi-k2.6",
       "temperature": 0,
-      "description": "TIER 2 — DeepSeek V4-Pro (direct, pay-per-use floor pricing $0.435/$0.87 per Mtok; effectively unlimited). Failover when build-go's Go-plan quota is hit, and the workhorse for moderate work. Frontier coding (80.6% SWE-bench, ~tied with GPT-5.5). Mandatory cross-model (GPT) review for cheap-tier output."
+      "description": "TIER 2 — Kimi K2.6 via opencode-go (flat plan fallback when Qwen quota hits). Long-horizon coder. On rate-limit → fall through to build-deep (DeepSeek thinking)."
     },
     "build-sonnet": {
       "mode": "all",
@@ -318,6 +318,12 @@
         "bash": "deny"
       },
       "prompt": "Second, independent high-stakes review (opposite family from a GPT-built diff). Report severity-rated findings; do NOT edit. The orchestrator reconciles you against the first reviewer for consensus."
+    },
+    "build-deep": {
+      "mode": "all",
+      "model": "deepseek/deepseek-reasoner",
+      "temperature": 0,
+      "description": "TIER 3 — DeepSeek V4-Pro Reasoner (thinking variant, direct DeepSeek API). Pay-per-use floor pricing, effectively unlimited. Failover from the Go-plan tiers; cheaper than Sonnet for hard reasoning. Mandatory cross-model (Sonnet or GPT) review."
     }
   },
   "command": {

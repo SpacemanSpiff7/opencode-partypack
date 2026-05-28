@@ -164,7 +164,7 @@ function detectPatterns(root, sessionID, cfg) {
 export default async ({ worktree, directory }) => {
   const root = worktree || directory || process.cwd()
   const cfg = loadConfig(root)
-  if (cfg.enabled === false) return {}
+  if (cfg.enabled === false) return { event: async () => {} }
 
   return {
     event: async ({ event }) => {

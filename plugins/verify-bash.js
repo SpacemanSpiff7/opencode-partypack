@@ -53,7 +53,6 @@ import os from "node:os"
 import path from "node:path"
 
 const AUTH_PATH = path.join(os.homedir(), ".local/share/opencode/auth.json")
-const DISABLED = process.env.OPENCODE_VERIFY_BASH === "off"
 const NOCACHE_ENV = process.env.OPENCODE_VERIFY_BASH_NOCACHE === "1"
 const TIMEOUT_ENV = Number(process.env.OPENCODE_VERIFY_BASH_TIMEOUT || 0) || null
 
@@ -61,12 +60,11 @@ const TIMEOUT_ENV = Number(process.env.OPENCODE_VERIFY_BASH_TIMEOUT || 0) || nul
 const ALWAYS_SAFE_RE = /^\s*(pwd|whoami|hostname|date)\s*$/
 
 const DEFAULT_MODELS = [
-  { provider: "openai-api", model: "gpt-5.5" },
   { provider: "openai-api", model: "gpt-5.4" },
   { provider: "openai-api", model: "gpt-5.4-mini" },
-  { provider: "anthropic-personal", model: "claude-opus-4-6" },
   { provider: "anthropic-personal", model: "claude-sonnet-4-6" },
   { provider: "anthropic-personal", model: "claude-haiku-4-5" },
+  { provider: "deepseek", model: "deepseek-v4-pro" },
 ]
 
 const DEFAULT_SENTRY = [
@@ -242,6 +240,32 @@ async function callAnthropic(key, model, sentry, body, timeoutMs) {
   }
 }
 
+async function callDeepSeek(key, model, sentry, body, timeoutMs) {
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.deepseek.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "content-type": "application/json" },
+        body: JSON.stringify({
+          model,
+          max_tokens: 200,
+          messages: [
+            { role: "system", content: sentry },
+            { role: "user", content: body },
+          ],
+        }),
+      },
+      timeoutMs,
+    )
+    if (!res.ok) return null
+    const j = await res.json()
+    return j?.choices?.[0]?.message?.content || null
+  } catch {
+    return null
+  }
+}
+
 function callModel(spec, auth, sentry, body, timeoutMs) {
   if (spec.provider === "openai-api") {
     const key = getApiKey(auth, "openai-api")
@@ -252,6 +276,11 @@ function callModel(spec, auth, sentry, body, timeoutMs) {
     const key = getApiKey(auth, "anthropic-personal")
     if (!key) return Promise.resolve(null)
     return callAnthropic(key, spec.model, sentry, body, timeoutMs)
+  }
+  if (spec.provider === "deepseek") {
+    const key = getApiKey(auth, "deepseek")
+    if (!key) return Promise.resolve(null)
+    return callDeepSeek(key, spec.model, sentry, body, timeoutMs)
   }
   return Promise.resolve(null)
 }
@@ -290,7 +319,7 @@ function makeLRU(max) {
 export default async ({ worktree, directory }) => {
   const root = worktree || directory || process.cwd()
   const config = loadConfig(root)
-  const enabled = !DISABLED && config.enabled !== false
+  const enabled = config.enabled !== false
   const models = Array.isArray(config.models) && config.models.length > 0 ? config.models : DEFAULT_MODELS
   const minAllow = Number.isInteger(config.minAllow) ? config.minAllow : 3
   const timeoutMs = TIMEOUT_ENV || Number(config.timeoutMs) || 12000
@@ -322,7 +351,7 @@ export default async ({ worktree, directory }) => {
 
   return {
     "tool.execute.before": async (input, output) => {
-      if (!enabled) return
+      if (!enabled || process.env.OPENCODE_VERIFY_BASH === "off") return
       const tool = output?.tool ?? input?.tool ?? ""
       if (tool !== "bash") return
       const cmd = String(input?.args?.command ?? output?.args?.command ?? "")

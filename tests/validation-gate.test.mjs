@@ -182,7 +182,7 @@ describe("disabled mode", () => {
 
 describe("session.idle for other event types", () => {
   it("ignores non-idle events", async () => {
-    writeTrace("ses-test", [{ tool: "read" }])
+    
     const plugin = await loadPlugin()
     const hooks = await plugin({ worktree: tmpDir, directory: tmpDir })
     await hooks.event({ event: { type: "file.edited", properties: {} } })
