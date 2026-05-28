@@ -639,11 +639,37 @@ export default async ({ worktree, directory }) => {
   const cache = makeCache(root, cacheEnabled)
 
   const LOG_PATH = path.join(root, ".opencode/logs/guard-config-review.log")
+  const APPROVAL_FILE = path.join(root, ".opencode/guard-config-review-next-approved")
+  const APPROVAL_LOG = path.join(root, ".opencode/guard-config-review-approvals.log")
+  const VIOLATIONS_LOG = path.join(root, ".opencode/security-violations.log")
 
   function logDecision(entry) {
     try {
       fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true })
       fs.appendFileSync(LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n")
+    } catch {
+      /* never block on logging */
+    }
+  }
+
+  function logViolation(entry) {
+    // Persistent record of every DENY decision — surfaced to the user/agent for
+    // "don't make this mistake again" review. Survives override (the override
+    // gets its own log entry on top; this one stays).
+    try {
+      fs.mkdirSync(path.dirname(VIOLATIONS_LOG), { recursive: true })
+      fs.appendFileSync(VIOLATIONS_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n")
+    } catch {
+      /* never block on logging */
+    }
+  }
+
+  function logApproval(entry) {
+    // Record of every override approval — includes the user's rationale + the
+    // original dissenter reasons so we can audit override patterns later.
+    try {
+      fs.mkdirSync(path.dirname(APPROVAL_LOG), { recursive: true })
+      fs.appendFileSync(APPROVAL_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n")
     } catch {
       /* never block on logging */
     }
@@ -670,6 +696,36 @@ export default async ({ worktree, directory }) => {
       // Non-sensitive writes bypass entirely.
       if (!sensitiveMatch(absPath)) return
 
+      // One-shot bypass: user previously saw a DENY, decided to proceed,
+      // and ran `/approve-config "<rationale>"`. Consume the file, log to
+      // approvals, let this exact write through.
+      if (fs.existsSync(APPROVAL_FILE)) {
+        let rationale = ""
+        try {
+          rationale = fs.readFileSync(APPROVAL_FILE, "utf8").trim()
+        } catch {
+          /* default to empty */
+        }
+        try {
+          fs.unlinkSync(APPROVAL_FILE)
+        } catch {
+          /* don't block on cleanup */
+        }
+        logApproval({
+          path: absPath,
+          kind,
+          rationale: rationale || "(no rationale provided)",
+        })
+        logDecision({
+          verdict: "ALLOW",
+          reason: "one-shot-user-approval",
+          path: absPath,
+          kind,
+          rationale: rationale || "(no rationale provided)",
+        })
+        return
+      }
+
       // Cache lookup.
       const cacheKey = sha256(absPath + "\n" + diff)
       const cached = cache.get(cacheKey)
@@ -682,6 +738,7 @@ export default async ({ worktree, directory }) => {
           cachedAt: new Date(cached.ts).toISOString(),
         })
         if (cached.verdict === "DENY") {
+          logViolation({ path: absPath, kind, reason: "cache-hit-deny", dissenters: cached.reasons })
           throw new Error(formatDeny(absPath, kind, cached.reasons))
         }
         return
@@ -693,6 +750,7 @@ export default async ({ worktree, directory }) => {
         // The whole point of this gate is independent review; without it, block.
         const reason = "no auth.json — reviewers unreachable, fail-closed on sensitive path"
         logDecision({ verdict: "DENY", reason: "no-auth", path: absPath, kind })
+        logViolation({ path: absPath, kind, reason: "no-auth", dissenters: [reason] })
         throw new Error(formatDeny(absPath, kind, [reason]))
       }
 
@@ -766,6 +824,15 @@ export default async ({ worktree, directory }) => {
       if (stage2Denies.length > 0) {
         const reasons = stage2Denies.map((d) => `[${d.name}] ${d.detail}`)
         cache.set(cacheKey, "DENY", reasons)
+        logViolation({
+          path: absPath,
+          kind,
+          reason: "stage2-deny",
+          dissenters: reasons,
+          stage1: stage1Votes.map((v) => ({ m: v.name, v: v.status, detail: v.detail })),
+          stage2: stage2Votes.map((v) => ({ m: v.name, v: v.status, detail: v.detail })),
+          diffSha: cacheKey,
+        })
         logDecision({
           verdict: "DENY",
           reason: "stage2-deny",
@@ -787,6 +854,15 @@ export default async ({ worktree, directory }) => {
             "(need ≥2 ALLOW + 0 DENY + 0 abstain)",
         ]
         cache.set(cacheKey, "DENY", reasons)
+        logViolation({
+          path: absPath,
+          kind,
+          reason: "stage2-insufficient",
+          dissenters: reasons,
+          stage1: stage1Votes.map((v) => ({ m: v.name, v: v.status, detail: v.detail })),
+          stage2: stage2Votes.map((v) => ({ m: v.name, v: v.status, detail: v.detail })),
+          diffSha: cacheKey,
+        })
         logDecision({
           verdict: "DENY",
           reason: "stage2-insufficient",
@@ -820,14 +896,23 @@ export default async ({ worktree, directory }) => {
 
 function formatDeny(absPath, kind, reasons) {
   return (
-    "\n🚫 guard-config-review SECURITY DENY — HARD STOP.\n\n" +
+    "\n🚫 guard-config-review SECURITY DENY — HARD STOP. USER DECISION REQUIRED.\n\n" +
     `Proposed ${kind} to security-sensitive path: ${absPath}\n\n` +
     "Reviewers said:\n  " +
     reasons.join("\n  ") +
     "\n\n" +
-    "This gate has NO /approve override. Recovery:\n" +
-    "  • Edit the file yourself outside opencode if you want the change.\n" +
-    "  • Or: revise instructions so the agent proposes a narrower change and retry.\n" +
-    "DO NOT retry, rephrase, or work around this write inside opencode.\n"
+    "Violation recorded to .opencode/security-violations.log for future audit.\n\n" +
+    "USER OPTIONS:\n" +
+    "  1. ACCEPT the deny — pick a different approach. Tell the agent so it stops retrying.\n" +
+    "  2. OVERRIDE — if you've reviewed the risk and want to proceed anyway:\n" +
+    "         /approve-config \"<your rationale for why this is safe>\"\n" +
+    "     (creates .opencode/guard-config-review-next-approved containing your rationale;\n" +
+    "      one-shot — every subsequent sensitive write goes back to full review).\n" +
+    "     Then ask the agent to retry the EXACT same change.\n" +
+    "     Override is recorded to .opencode/guard-config-review-approvals.log with your\n" +
+    "     rationale + the original dissenter reasons.\n\n" +
+    "AGENT INSTRUCTIONS (read carefully):\n" +
+    "  DO NOT retry, rephrase, paraphrase, or work around this write without the user\n" +
+    "  explicitly running /approve-config. Surface this verbatim and wait.\n"
   )
 }

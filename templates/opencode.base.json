@@ -422,6 +422,11 @@
       "description": "One-shot approval of a verify-bash-denied command — creates the bypass file and retries",
       "agent": "build-fast",
       "template": "Create `.opencode/verify-bash-next-approved` (use `touch`) — this is the one-shot bypass that verify-bash consumes on the NEXT bash call. Then immediately retry the EXACT bash command that was just denied by consensus. The previously-denied command and the user's approval rationale: $ARGUMENTS"
+    },
+    "approve-config": {
+      "description": "Approve a guard-config-review SECURITY DENY — writes rationale to the one-shot bypass file. Next sensitive write goes through; everything after re-runs full review.",
+      "agent": "build-fast",
+      "template": "Write the user-provided rationale into `.opencode/guard-config-review-next-approved` (single file, plain text). Use: printf %s \"$ARGUMENTS\" > .opencode/guard-config-review-next-approved. Then surface ONE line back: \"Override armed — retry the EXACT write that was denied (do not paraphrase). Rationale logged.\" Do NOT retry the write yourself; the agent that proposed the write must retry."
     }
   }
 }

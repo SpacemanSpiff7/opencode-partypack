@@ -251,12 +251,35 @@ Each votes `ALLOW` or `DENY`. **ANY DENY → block.** Need ≥2 ALLOW + 0 DENY +
 - `.opencode/agents/**`, `.claude/agents/**`
 - The gate's own source (`plugins/guard-config-review.js`) — bootstrap protection.
 
-### On DENY — hard block, no override
+### On DENY — hard block, present risk, one-shot user override, persistent audit
 
-Per the v1 design (paranoid by default), there's no `/approve` bypass and no notification. The write throws with each dissenter's verbatim reason quoted. Recovery: edit the file yourself outside opencode, or revise the agent's instructions and retry with a narrower change.
+Every DENY is recorded to `.opencode/security-violations.log` (JSON line per violation, persistent across sessions). The line includes the full path, kind, dissenter reasons, both stage panels' votes with detail, and the SHA-256 diff hash. You build up a project history of every block — useful for "don't make this mistake again" review and for noticing patterns ("the agent keeps trying to weaken the sudo deny — investigate why").
 
-Why no override? The recovery path for a false-positive deny is one manual file edit. The recovery path for a false-positive allow is exfiltrated secrets, a malicious dep on your build path, or a weakened safety rail you didn't notice. The defaults are paranoid; if false positives become annoying in practice, we'll revisit.
+The plugin throws with a structured error containing:
+- the proposed path and kind
+- each dissenter's verbatim verdict and reason
+- a note that the violation has been recorded
+- explicit USER OPTIONS (accept the deny, or override with `/approve-config`)
+- explicit AGENT INSTRUCTIONS (do NOT retry, paraphrase, or work around — surface verbatim and wait)
 
+If you decide the change IS safe — you've read the diff yourself or you know why the reviewers' concern is a false positive — run:
+
+```
+/approve-config "I reviewed the diff. This is a deploy script that needs network egress to the GitHub release API."
+```
+
+That command writes your rationale into `.opencode/guard-config-review-next-approved`. On the very next sensitive write, the plugin consumes the file, appends an entry to `.opencode/guard-config-review-approvals.log` with your rationale + the original dissenter reasons, and lets that one write through. The bypass is **one-shot** — every sensitive write after that goes back to full panel review.
+
+**Two logs, two purposes:**
+
+| File | Contents | Persistence |
+|---|---|---|
+| `.opencode/security-violations.log` | Every DENY. Original reviewer reasons, both stage votes, diff hash. | Forever. Survives override — the override gets its own log entry on top; this one stays as the canonical "this was flagged once". |
+| `.opencode/guard-config-review-approvals.log` | Every override. Your rationale, the path, timestamp. | Forever. Auditable trail of when you chose to proceed despite the gate. |
+
+Both files are added to `.gitignore` by `init.sh`. Optional: commit `security-violations.log` to your project history so the agent can read it in future sessions and learn from past denies. The harness intentionally does NOT auto-inject the violations log into the orchestrator's system prompt — you choose whether the past influences the future.
+
+---
 ### Cost ceiling
 
 - Most edits skip the gate entirely (not on a sensitive path) → $0
