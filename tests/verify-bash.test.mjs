@@ -48,8 +48,9 @@ afterEach(() => {
 })
 
 // Hybrid 3+2 mock: Stage 1 (anthropic-haiku + deepseek-flash) and Stage 2
-// (anthropic-sonnet + openai-gpt + deepseek-pro). Distinguish stages by the
-// "Stage X of 2" sentinel in the prompt body.
+// (anthropic-opus + anthropic-sonnet + openai-gpt). Distinguish stages by the
+// "Stage X of 2" sentinel in the prompt body. Stage 2 makes 2 Anthropic + 1
+// OpenAI requests; no DeepSeek call in Stage 2.
 function mockPanel({
   s1_anthropic = [],
   s1_deepseek = [],
@@ -158,9 +159,8 @@ describe("Stage 1 FLAG → Stage 2 ALLOW", () => {
     mockPanel({
       s1_anthropic: ["FLAG: looks fishy"],
       s1_deepseek: ["ALLOW: ok"],
-      s2_anthropic: ["ALLOW: standard idiom"],
-      s2_openai: ["ALLOW: benign"],
-      s2_deepseek: ["ALLOW: ok"],
+      s2_anthropic: ["ALLOW: standard idiom", "ALLOW: benign"], // opus + sonnet
+      s2_openai: ["ALLOW: ok"], // gpt-5.4
     })
     const hooks = await getHooks()
     await expect(callBefore(hooks, "make build foo")).resolves.toBeUndefined()
@@ -206,9 +206,8 @@ describe("Stage 2 DENY → block", () => {
     mockPanel({
       s1_anthropic: ["FLAG: bad"],
       s1_deepseek: ["FLAG: same"],
-      s2_anthropic: ["DENY: confirms — destructive"],
-      s2_openai: ["DENY: confirms"],
-      s2_deepseek: ["DENY: agree"],
+      s2_anthropic: ["DENY: confirms — destructive", "DENY: agree"], // opus + sonnet
+      s2_openai: ["DENY: confirms"], // gpt-5.4
     })
     const hooks = await getHooks()
     await expect(callBefore(hooks, "rm -rf /tmp/foo")).rejects.toThrow(/STAGE-2 DENY/)
@@ -220,9 +219,8 @@ describe("Stage 2 DENY → block", () => {
     mockPanel({
       s1_anthropic: ["FLAG: bad"],
       s1_deepseek: ["ALLOW: ok"],
-      s2_anthropic: ["ALLOW: ok"],
-      s2_openai: ["DENY: subtle issue"],
-      s2_deepseek: ["ALLOW: ok"],
+      s2_anthropic: ["ALLOW: ok", "ALLOW: ok"], // opus + sonnet both allow
+      s2_openai: ["DENY: subtle issue"], // gpt-5.4 dissents
     })
     const hooks = await getHooks()
     await expect(callBefore(hooks, "make weird")).rejects.toThrow(/STAGE-2 DENY/)
@@ -234,9 +232,8 @@ describe("Stage 2 insufficient consensus → block", () => {
     mockPanel({
       s1_anthropic: ["FLAG: escalate"],
       s1_deepseek: ["ALLOW: ok"],
-      s2_anthropic: ["ALLOW: ok"],
-      s2_openai: [null], // abstain
-      s2_deepseek: [null], // abstain
+      s2_anthropic: ["ALLOW: ok", null], // opus allows + sonnet abstains
+      s2_openai: [null], // gpt abstains
     })
     const hooks = await getHooks()
     await expect(callBefore(hooks, "scripts/cleanup.sh")).rejects.toThrow(/INSUFFICIENT CONSENSUS/)
@@ -260,9 +257,8 @@ describe("all-abstain fallthrough", () => {
     mockPanel({
       s1_anthropic: ["FLAG: escalate"],
       s1_deepseek: ["ALLOW: ok"],
-      s2_anthropic: [null],
-      s2_openai: [null],
-      s2_deepseek: [null],
+      s2_anthropic: [null, null], // opus + sonnet abstain
+      s2_openai: [null], // gpt abstains
     })
     const hooks = await getHooks()
     await expect(callBefore(hooks, "weird-command")).resolves.toBeUndefined()

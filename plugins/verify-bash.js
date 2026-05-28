@@ -19,7 +19,7 @@
 //   Stage 1 (cheap, always): haiku-4-5 + deepseek-v4-flash. Vote ALLOW or FLAG.
 //     • Unanimous ALLOW → permit. No Stage 2 call. ~$0.0005, ~700ms.
 //     • Any FLAG (or any abstain) → escalate to Stage 2.
-//   Stage 2 (frontier, only on escalation): sonnet-4-6 + gpt-5.4 + deepseek-v4-pro.
+//   Stage 2 (frontier, only on escalation): opus-4-7 + sonnet-4-6 + gpt-5.4.
 //     Each frontier model sees the Stage 1 dissent reasons in its prompt so it
 //     can refute false positives. Vote ALLOW or DENY.
 //     • ANY DENY → block (cite all dissenters).
@@ -104,9 +104,9 @@ const STAGE1_DEFAULT = [
 // Stage 2 — frontier, only fires on Stage 1 FLAG. Sees the cheap dissent
 // reasons in its prompt so it can refute false positives.
 const STAGE2_DEFAULT = [
+  { provider: "anthropic-personal", model: "claude-opus-4-7" },
   { provider: "anthropic-personal", model: "claude-sonnet-4-6" },
   { provider: "openai-api", model: "gpt-5.4" },
-  { provider: "deepseek", model: "deepseek-v4-pro" },
 ]
 
 const DEFAULT_SENTRY = [
