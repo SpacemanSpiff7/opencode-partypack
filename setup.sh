@@ -7,7 +7,7 @@ H="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GLOBAL=~/.config/opencode/plugins
 mkdir -p "$GLOBAL"
 
-for p in verify-bash.js block-inline-scripts.js trace-log.js guard-secrets.js; do
+for p in verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
   if [[ -e "$GLOBAL/$p" && ! -L "$GLOBAL/$p" ]]; then
     mv "$GLOBAL/$p" "$GLOBAL/$p.bak.$(date +%s)"
     echo "  backed up existing non-symlink: $GLOBAL/$p"

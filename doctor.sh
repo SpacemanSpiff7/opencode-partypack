@@ -17,7 +17,7 @@ echo "harness: $H"
 echo
 
 echo "[1/6] harness repo + plugins"
-for p in verify-bash.js block-inline-scripts.js trace-log.js guard-secrets.js; do
+for p in verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
   if [[ -f "$H/plugins/$p" ]] && node --check "$H/plugins/$p" 2>/dev/null; then
     ok "plugins/$p (syntax OK)"
   else
@@ -27,7 +27,7 @@ done
 
 echo
 echo "[2/6] global symlinks → repo"
-for p in verify-bash.js block-inline-scripts.js trace-log.js guard-secrets.js; do
+for p in verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
   target="$(readlink ~/.config/opencode/plugins/$p 2>/dev/null)"
   expected="$H/plugins/$p"
   if [[ "$target" == "$expected" ]]; then

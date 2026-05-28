@@ -30,6 +30,7 @@ Two layers:
 Global (installed once, via setup.sh symlinks):
   ~/.config/opencode/plugins/
     ├── verify-bash.js           ← 5-model consensus gate on every bash
+    ├── guard-config-review.js   ← multi-model security review on every write to sensitive paths
     ├── validation-gate.js       ← session.idle: run gates + pattern-detect + queue work for next session
     ├── guard-secrets.js         ← block any bash touching .env or the auth store
     ├── block-inline-scripts.js  ← block `node -e` / `python -c` (force file-path form)
@@ -57,7 +58,7 @@ git clone https://github.com/SpacemanSpiff7/opencode-partypack.git ~/Documents/G
 ~/Documents/GitHub/opencode-partypack/doctor.sh   # sanity-check the install
 ```
 
-`setup.sh` symlinks all five plugins into `~/.config/opencode/plugins/`.
+`setup.sh` symlinks all six plugins into `~/.config/opencode/plugins/`.
 `doctor.sh` runs a 6-section sanity check and tells you exactly what to fix if anything's off.
 
 ### Auth (per machine, not per project)
@@ -188,6 +189,7 @@ opencode-partypack/
 │   └── with-build-lock         # stale-aware POSIX lock for cross-runtime build coordination
 ├── plugins/                    # symlinked into ~/.config/opencode/plugins/
 │   ├── verify-bash.js
+│   ├── guard-config-review.js
 │   ├── validation-gate.js
 │   ├── guard-secrets.js
 │   ├── block-inline-scripts.js
@@ -198,9 +200,125 @@ opencode-partypack/
 │   └── overlays/{swift,ruby,ts}.json
 ├── tests/
 │   ├── verify-bash.test.mjs
+│   ├── guard-config-review.test.mjs
 │   └── validation-gate.test.mjs
 └── package.json
 ```
+
+---
+
+## `guard-config-review` — independent multi-model review of every sensitive write
+
+> A multi-model security panel sits between your agent and any write to a config or script file. If the reviewers don't all green-light the diff, the write never lands.
+
+`block-inline-scripts.js` was a thin wrapper: it blocks `node -e` and `python -c` inline forms, but it's content-blind — an agent can write `scripts/util/exfil.mjs` with arbitrary content and run it by file path, and the inline-block hook happily lets it through. The real defense isn't blocking *how* code runs, it's reviewing *what* gets written.
+
+`guard-config-review.js` is that gate. It fires on every `write` / `edit` / `multiedit` / `patch` to a security-sensitive path, BEFORE the write commits.
+
+### Sensitive paths (default — override per project)
+
+- **opencode surface:** `opencode.json`, `.opencode/{opencode.json, plugins/**, INSTRUCTIONS.md, agents/**, skills/**}`
+- **Claude Code surface:** `.claude/{settings*.json, agents/**, skills/**, plugins/**, hooks/**, rules/**, CLAUDE.md}`, plus `CLAUDE.md`
+- **scripts:** `scripts/**` (durable executable code; anything you write is reviewed)
+- **dep manifests:** `package.json`, `package-lock.json`, `Package.swift`, `Package.resolved`, `Gemfile`, `Podfile`, `requirements.txt`, `pyproject.toml`
+- **iOS surface:** `project.yml`, `*.entitlements`, `*.xcconfig`
+- **CI / release:** `.github/workflows/**`, `Fastfile`, `fastlane/**`
+- **Home equivalents:** `~/.config/opencode/**` and `~/.claude/**`
+
+### Ephemeral escape hatches (always bypass — zero cost)
+
+`/tmp/**`, `.scratch/**`, `.opencode/{runs,logs,screenshots,state}/**`, `DerivedData/**`, `.build/**`, `node_modules/**`, `scripts/seed-workouts/output/**`, `scripts/util/_*.json`.
+
+So debug one-shots, exploratory scripts, and build artifacts pay nothing. The gate fires only on durable, security-relevant writes.
+
+### Hybrid 3+2 panel
+
+**Stage 1 — cheap pre-filter (always runs, ~$0.001):**
+- `anthropic-personal/claude-haiku-4-5`
+- `deepseek/deepseek-v4-flash`
+
+Each votes `ALLOW` or `FLAG`. Catches obvious slop (exfil URLs, `rm -rf`, hardcoded keys, weakened deny rules) for almost nothing.
+
+**Stage 2 — frontier decision (only if Stage 1 flags, diff > 200 lines, or path is on the always-frontier list):**
+- `anthropic-personal/claude-opus-4-7`
+- `openai-api/gpt-5.5-pro`
+- `anthropic-personal/claude-sonnet-4-6`
+
+Each votes `ALLOW` or `DENY`. **ANY DENY → block.** Need ≥2 ALLOW + 0 DENY + 0 abstain to permit. Anything less → block on insufficient consensus.
+
+**Always-frontier paths** (Stage 1 is skipped — paranoid review every time):
+- `.opencode/plugins/**`, `.claude/plugins/**`, `.claude/hooks/**`
+- `.opencode/agents/**`, `.claude/agents/**`
+- The gate's own source (`plugins/guard-config-review.js`) — bootstrap protection.
+
+### On DENY — hard block, no override
+
+Per the v1 design (paranoid by default), there's no `/approve` bypass and no notification. The write throws with each dissenter's verbatim reason quoted. Recovery: edit the file yourself outside opencode, or revise the agent's instructions and retry with a narrower change.
+
+Why no override? The recovery path for a false-positive deny is one manual file edit. The recovery path for a false-positive allow is exfiltrated secrets, a malicious dep on your build path, or a weakened safety rail you didn't notice. The defaults are paranoid; if false positives become annoying in practice, we'll revisit.
+
+### Cost ceiling
+
+- Most edits skip the gate entirely (not on a sensitive path) → $0
+- Edits to a sensitive path that pass Stage 1 unanimously and stay small → ~$0.001
+- Escalations to Stage 2 → ~$0.05 each (frontier reasoning)
+
+Typical day: <$1 even with active config/script work. The SHA-256 cache (24h TTL on `.opencode/logs/guard-config-review.cache.json`) means identical re-proposals don't re-bill.
+
+### Subagent gap (opencode #5894)
+
+`tool.execute.*` plugin hooks **don't fire** for `task`-spawned subagent tool calls. That includes this gate. So a subagent that has `edit` permission on sensitive paths bypasses the review.
+
+The mitigation is permission topology, not the plugin: deny `edit` on sensitive paths in every non-orchestrator agent's permission block. Subagents physically can't write the protected surface; only the primary orchestrator (covered by the plugin) can. Default templates ship this stance — see `templates/opencode.base.json`.
+
+### Configuration
+
+Per-project overrides go in `.opencode/guard-config-review.config.json`:
+
+```json
+{
+  "enabled": true,
+  "stage1Models": [...],
+  "stage2Models": [...],
+  "sensitivePatterns": ["extra/path/**"],
+  "ephemeralPatterns": ["custom/scratch/**"],
+  "alwaysFrontierPatterns": ["my/critical/**"],
+  "timeoutMs": 20000,
+  "escalateLineCount": 200,
+  "cache": true
+}
+```
+
+Project-supplied patterns are merged ON TOP of the defaults — they extend, never replace. To wholly replace, set `enabled: false` and roll your own.
+
+### Kill switches
+
+```
+OPENCODE_GUARD_CONFIG_REVIEW=off          # disable for this opencode invocation
+OPENCODE_GUARD_CONFIG_REVIEW_NOCACHE=1    # disable cache (every diff re-reviewed)
+OPENCODE_GUARD_CONFIG_REVIEW_TIMEOUT=ms   # override per-call deadline
+```
+
+### Logs
+
+Every decision lands in `.opencode/logs/guard-config-review.log` as one JSON line per write:
+
+```json
+{"ts":"2026-05-28T19:14:22Z","verdict":"ALLOW","reason":"stage1-pass","path":"/repo/scripts/util/foo.mjs","kind":"write","stage1Allows":2,"stage1Flags":0,"stage1Abstains":0,"latencyMs":1142,"lineCount":18}
+{"ts":"2026-05-28T19:16:08Z","verdict":"DENY","reason":"stage2-deny","path":"/repo/opencode.json","kind":"write","stage1":[...],"stage2":[...],"dissenters":["[anthropic-personal/claude-opus-4-7] DENY: removes the sudo deny rule"],"latencyMs":4830,"lineCount":42}
+```
+
+Auditable trail of every reviewer decision, every cache hit, every ephemeral bypass.
+
+### Honest limits
+
+- **Argv- and content-based, not OS-level.** A creatively-encoded malicious diff (steganographic comments, obfuscated control flow) could pass review. The panel is paranoid but not omniscient.
+- **Bootstrapping paradox.** The gate's source must itself be on the protected list, but the first commit of the gate's source has no gate to review it. Human PR review (`gh pr review`) backstops the initial install and any future change to the gate's own files.
+- **Subagent gap.** Permission engine closes most of it; the plugin doesn't cover what it can't see. Design docs at `docs/SECURITY-REVIEW-GATE.md`.
+- **False positives unrecoverable inside opencode.** Deliberate trade-off. Recovery is manual file edit.
+- **Cost ceiling not a guarantee.** A pathological burst of huge diffs could blow past $1/day. Daily-spend kill switch is a future enhancement.
+
+The only stronger defense is OS-level sandboxing, which breaks the Xcode/Simulator toolchain in our setup so it's not on the table. This gate is a significant practical improvement over `block-inline-scripts`, not a perfect guarantee.
 
 ---
 
