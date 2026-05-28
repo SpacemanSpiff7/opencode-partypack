@@ -73,6 +73,24 @@ if [[ "$UPDATE" -eq 0 ]]; then
   fi
 fi
 
+# Swift overlay ships `<YOUR-SCHEME>` placeholder in /build — offer to fill it
+# in now (interactive only; skip in non-TTY contexts like CI). On --update,
+# this block is skipped because opencode.json isn't regenerated; the
+# trailing next-steps warning still fires below if the placeholder remains.
+if [[ "$LANG_OVERLAY" == "swift" && "$UPDATE" -eq 0 && -f "$TARGET/opencode.json" ]] && grep -q '<YOUR-SCHEME>' "$TARGET/opencode.json"; then
+  echo
+  if [[ -t 0 ]]; then
+    read -r -p "Xcode scheme name for /build command (blank to set later): " SCHEME
+    # Reject empty / whitespace-only; escape sed metacharacters (&, |, \)
+    # so a scheme like `Foo&Bar` or `Foo|Bar` doesn't break the substitution.
+    if [[ -n "$SCHEME" && "$SCHEME" =~ [^[:space:]] ]]; then
+      esc=$(printf '%s' "$SCHEME" | sed 's/[&|\\]/\\&/g')
+      sed -i.bak "s|<YOUR-SCHEME>|$esc|g" "$TARGET/opencode.json" && rm "$TARGET/opencode.json.bak"
+      echo "  ✓ scheme set to: $SCHEME"
+    fi
+  fi
+fi
+
 # .gitignore additions (idempotent).
 if [[ -f "$TARGET/.gitignore" ]] && ! grep -q ".opencode/logs/" "$TARGET/.gitignore"; then
   cat >> "$TARGET/.gitignore" <<GITIEOF
@@ -98,3 +116,7 @@ echo "Next:"
 echo "  1. cd $TARGET && opencode auth login   (Other → anthropic-personal, openai-api, …)"
 echo "  2. Review opencode.json: model, external_directory allowlist, project bash entries."
 echo "  3. Edit .opencode/INSTRUCTIONS.md: project-specific intent→skill mappings."
+if [[ -f "$TARGET/opencode.json" ]] && grep -q '<YOUR-SCHEME>' "$TARGET/opencode.json"; then
+  echo
+  echo "  ⚠ opencode.json still contains <YOUR-SCHEME> — replace with your Xcode scheme before using /build"
+fi
