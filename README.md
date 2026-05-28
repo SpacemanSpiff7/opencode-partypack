@@ -341,7 +341,7 @@ Both files are added to `.gitignore` by `init.sh`. Optional: commit `security-vi
 - Edits to a sensitive path that pass Stage 1 unanimously and stay small → ~$0.001
 - Escalations to Stage 2 → ~$0.05 each (frontier reasoning)
 
-Typical day: <$1 even with active config/script work. The SHA-256 cache (24h TTL on `.opencode/logs/guard-config-review.cache.json`) means identical re-proposals don't re-bill.
+Typical day: <$1 even with active config/script work. The SHA-256 cache (24h TTL on `.opencode/guard-config-review.cache.json`) means identical re-proposals don't re-bill.
 
 ### Subagent gap (opencode #5894)
 
