@@ -17,7 +17,7 @@ echo "harness: $H"
 echo
 
 echo "[1/6] harness repo + plugins"
-for p in verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
+for p in verify-bash-auto-allow.js verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
   if [[ -f "$H/plugins/$p" ]] && node --check "$H/plugins/$p" 2>/dev/null; then
     ok "plugins/$p (syntax OK)"
   else
@@ -27,7 +27,7 @@ done
 
 echo
 echo "[2/6] global symlinks → repo"
-for p in verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
+for p in verify-bash-auto-allow.js verify-bash.js guard-config-review.js validation-gate.js block-inline-scripts.js trace-log.js guard-secrets.js; do
   target="$(readlink ~/.config/opencode/plugins/$p 2>/dev/null)"
   expected="$H/plugins/$p"
   if [[ "$target" == "$expected" ]]; then
@@ -82,10 +82,24 @@ else
   warn "skipping anthropic check (no key)"
 fi
 if [[ -n "$OAI_KEY" ]]; then
-  code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://api.openai.com/v1/chat/completions" \
-    -H "Authorization: Bearer $OAI_KEY" -H "content-type: application/json" \
-    --data '{"model":"gpt-5.4-mini","max_tokens":4,"messages":[{"role":"user","content":"hi"}]}' --max-time 8)
-  [[ "$code" == "200" ]] && ok "openai-api reachable + key valid (gpt-5.4-mini)" || bad "openai-api returned HTTP $code"
+  # Probe a CANDIDATE LIST: not every API key has gpt-5.4-mini enabled per project.
+  # Pass if ANY candidate returns 200; report which one. Uses max_completion_tokens
+  # for GPT-5.x reasoning-model compatibility (non-reasoning models accept it too).
+  OPENAI_PROBE_MODELS=( "gpt-5.5-pro" "gpt-5.5" "gpt-5.4-mini" )
+  probe_ok=""
+  last_code=""
+  for m in "${OPENAI_PROBE_MODELS[@]}"; do
+    code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://api.openai.com/v1/chat/completions" \
+      -H "Authorization: Bearer $OAI_KEY" -H "content-type: application/json" \
+      --data "{\"model\":\"$m\",\"max_completion_tokens\":4,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" --max-time 8)
+    if [[ "$code" == "200" ]]; then probe_ok="$m"; break; fi
+    last_code="$code"
+  done
+  if [[ -n "$probe_ok" ]]; then
+    ok "openai-api reachable + key valid (responded on $probe_ok)"
+  else
+    bad "openai-api returned HTTP $last_code on every candidate (${OPENAI_PROBE_MODELS[*]}) — enable at least one of these models for this project at platform.openai.com/settings/organization/limits"
+  fi
 else
   warn "skipping openai-api check (no key)"
 fi

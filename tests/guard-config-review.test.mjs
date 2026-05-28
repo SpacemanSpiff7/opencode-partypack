@@ -399,3 +399,26 @@ describe("patch tool", () => {
     expect(log[0].path).toContain("scripts/util/foo.mjs")
   })
 })
+
+// ---------- OpenAI request body shape (cross-plugin check) ----------
+
+describe("guard-config-review OpenAI body shape", () => {
+  it("sends max_completion_tokens (not max_tokens) on Stage 2 OpenAI calls", async () => {
+    mockPanel({
+      s1_anthropic: ["FLAG: review"],
+      s1_deepseek: ["ALLOW: ok"],
+      s2_anthropic: ["ALLOW: ok", "ALLOW: ok"], // opus + sonnet
+      s2_openai: ["ALLOW: ok"], // gpt-5.5-pro
+    })
+    const hooks = await getHooks()
+    await callBefore(hooks, "write", {
+      file_path: path.join(tmpDir, "opencode.json"),
+      content: '{"agent":{}}',
+    })
+    const openaiCall = global.fetch.mock.calls.find(([u]) => String(u).includes("api.openai.com"))
+    expect(openaiCall, "expected an OpenAI panel call").toBeTruthy()
+    const sentBody = JSON.parse(openaiCall[1].body)
+    expect(sentBody.max_completion_tokens).toBe(400)
+    expect(sentBody.max_tokens).toBeUndefined()
+  })
+})

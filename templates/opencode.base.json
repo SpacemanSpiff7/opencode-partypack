@@ -427,6 +427,11 @@
       "description": "Approve a guard-config-review SECURITY DENY — writes rationale to the one-shot bypass file. Next sensitive write goes through; everything after re-runs full review.",
       "agent": "build-fast",
       "template": "Write the user-provided rationale into `.opencode/guard-config-review-next-approved` (single file, plain text). Use: printf %s \"$ARGUMENTS\" > .opencode/guard-config-review-next-approved. Then surface ONE line back: \"Override armed — retry the EXACT write that was denied (do not paraphrase). Rationale logged.\" Do NOT retry the write yourself; the agent that proposed the write must retry."
+    },
+    "auto-allow": {
+      "description": "Append an EXACT command string to the verify-bash auto-allow list (.opencode/verify-bash-auto-allow.config.json). The next time that exact command runs, the auto-allow plugin writes the verify-bash bypass sentinel and the panel is skipped.",
+      "agent": "build-fast",
+      "template": "Read .opencode/verify-bash-auto-allow.config.json if it exists (otherwise start with { \"allowlist\": [] }). Append the user-provided exact command string to the allowlist array if not already present. Whitespace-normalize before comparing. Pretty-print back to disk. Confirm in ONE line: \"Added <cmd> to verify-bash auto-allow (now N entries).\" The user supplied: $ARGUMENTS"
     }
   }
 }

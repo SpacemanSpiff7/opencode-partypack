@@ -85,6 +85,7 @@ if [[ -f "$TARGET/.gitignore" ]] && ! grep -q ".opencode/logs/" "$TARGET/.gitign
 .opencode/guard-config-review-approvals.log
 .opencode/guard-config-review.whitelist.json
 .opencode/security-violations.log
+.opencode/verify-bash-auto-allow.config.json
 GITIEOF
 fi
 
