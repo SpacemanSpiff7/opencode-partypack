@@ -12,6 +12,23 @@ Intent → skill (TODO: fill in your project's mappings):
 
 - "<intent>" → `<skill-name>`
 
+## Concurrent sessions: one worktree per agent
+
+Other agents and the user may also be writing to this repo. You are not
+guaranteed to be the only editor.
+
+- Before editing, run `git status`. If you see uncommitted changes you
+  didn't make, STOP and surface them — another agent may be mid-edit.
+  Silent overwrites are the failure mode.
+- Commit your work atomically before pausing or yielding. Never leave
+  unstaged edits between context switches.
+- If you were told you're working in a dedicated worktree, you are
+  isolated; otherwise assume shared state and behave accordingly. The
+  operator's worktree pattern: `git worktree add ../<repo>-<task> -b <branch> main`.
+
+If you're unsure who owns an in-flight change, ask. Better one round of
+clarification than a lost diff.
+
 ## Grounding & anti-hallucination — apply to every claim about code
 
 - **Cite before claiming.** Don't assert what a function does, how a flow

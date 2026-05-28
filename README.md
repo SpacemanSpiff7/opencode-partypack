@@ -163,9 +163,25 @@ Vitest covers:
 
 `tool.execute.before` / `tool.execute.after` are **NOT triggered** for subagents spawned via the `task` tool. So `verify-bash`, `guard-secrets`, `block-inline-scripts`, and `trace-log` cover the **primary agent only**. The orchestrator prompts in the base config keep builds in the orchestrator's lane and all subagents read-only — if you write new agents, follow that pattern or your guards silently won't fire.
 
-### 2. Claude Code coexistence
+### 2. Concurrent sessions — use one worktree per agent
 
-If you also use Claude Code (`.claude/`) in the same repo, both runtimes can race on `xcodebuild` / lint hooks / staged-file edits. Use `bin/with-build-lock` from both runtimes for destructive ops, or don't run them concurrently in the same worktree on build-heavy projects.
+The failure mode you're protecting against: two agents (Claude Code + opencode, two opencode sessions, opencode + a human editor) holding uncommitted edits to the same file at the same time. Whoever commits or saves last silently wins; the loser's work is gone.
+
+opencode itself has no opinion about this — neither does git. The workflow that eliminates the race is **one git worktree per session**:
+
+```bash
+# Open a fresh isolated working tree off main for a new task:
+git worktree add ../<repo>-<task-slug> -b feat/<task-slug> main
+
+# Then open the new session in that path:
+opencode ../<repo>-<task-slug>
+```
+
+Each worktree is a separate checkout backed by the same `.git`. Sessions can't clobber each other's working trees; merges happen through the normal PR flow. `main` is the example start-point — substitute any ref to branch from elsewhere.
+
+If you genuinely need two agents in the same worktree (rare): use `bin/with-build-lock` for destructive build/lint ops, commit before every context switch, and accept that silent-clobber is the cost of admission.
+
+Existing projects pick up the INSTRUCTIONS.md guidance only after `~/Documents/GitHub/opencode-partypack/init.sh <project> --update`.
 
 ### 3. verify-bash defaults to ON
 
