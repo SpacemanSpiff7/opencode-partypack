@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# multiagent-harness-opencode — scaffold a project's opencode config + docs.
+# opencode-partypack — scaffold a project's opencode config + docs.
 #
 # Plugins are GLOBAL (symlinked from this repo into ~/.config/opencode/plugins/
 # by setup.sh) — they apply to every opencode session automatically. This

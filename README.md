@@ -1,4 +1,4 @@
-# multiagent-harness-opencode
+# opencode-partypack
 
 Universal opencode setup. Plugins install once as global symlinks; new projects
 get the matching config + docs with one command.
@@ -36,8 +36,8 @@ retired or renamed, override the `models` array in
 ## One-time install (or on a new machine)
 
 ```bash
-git clone git@github.com:<you>/multiagent-harness-opencode.git ~/Documents/GitHub/multiagent-harness-opencode
-~/Documents/GitHub/multiagent-harness-opencode/setup.sh
+git clone git@github.com:<you>/opencode-partypack.git ~/Documents/GitHub/opencode-partypack
+~/Documents/GitHub/opencode-partypack/setup.sh
 ```
 
 `setup.sh` symlinks the four universal plugins (`verify-bash`,
@@ -48,7 +48,7 @@ project. After this you never touch plugins per project.
 ## Scaffolding a new project
 
 ```bash
-~/Documents/GitHub/multiagent-harness-opencode/init.sh /path/to/new-project --lang swift
+~/Documents/GitHub/opencode-partypack/init.sh /path/to/new-project --lang swift
 ```
 
 Without `--lang`, you get the universal base. Available overlays: `swift`,
@@ -67,14 +67,14 @@ with the globals). Most projects won't need any.
 ## Updating
 
 ```bash
-git -C ~/Documents/GitHub/multiagent-harness-opencode pull
+git -C ~/Documents/GitHub/opencode-partypack pull
 ```
 
 Plugins refresh **immediately** in every project (they're symlinks). For
 templates (`opencode.json` base, INSTRUCTIONS.md, overlays), re-run:
 
 ```bash
-~/Documents/GitHub/multiagent-harness-opencode/init.sh /path/to/project --update
+~/Documents/GitHub/opencode-partypack/init.sh /path/to/project --update
 ```
 
 `--update` refreshes the template files but **never overwrites** `opencode.json`
@@ -110,7 +110,7 @@ opencode auth login
 ## Layout
 
 ```
-multiagent-harness-opencode/
+opencode-partypack/
 ├── README.md                   # this file
 ├── setup.sh                    # one-time: symlink plugins into ~/.config/opencode/plugins/
 ├── init.sh                     # per project: scaffold config + docs

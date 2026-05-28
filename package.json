@@ -1,5 +1,5 @@
 {
-  "name": "opencode-harness",
+  "name": "opencode-partypack",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,5 +8,6 @@
   },
   "devDependencies": {
     "vitest": "^2.1.0"
-  }
+  },
+  "description": "Universal opencode setup — drop-in plugins, agents, commands, and self-improvement gates for any new project."
 }
